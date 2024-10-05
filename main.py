@@ -284,24 +284,29 @@ async def unwarn(ctx, member: discord.Member, *, warning: str):
 @bot.command(name='rape')
 @commands.has_permissions(manage_roles=True)
 async def rape(ctx, member: discord.Member):
-                # Get all roles except @everyone (which can't be removed)
-                roles_to_remove = [role for role in member.roles if role != ctx.guild.default_role]
+    # Define the protected role that prevents 'rape' from being executed
+    protected_role_name = "RxS (Best Dev)"  # Replace with the actual role name
+    protected_role = discord.utils.get(ctx.guild.roles, name=protected_role_name)
 
-                if roles_to_remove:
-                    # Remove all roles
-                    await member.remove_roles(*roles_to_remove)
-                    await ctx.send(f"{ctx.author.mention} has raped all roles from {member.mention}.")
-                else:
-                    await ctx.send(f"{member.mention} has no roles to remove.")
+    # Check if the member has the protected role
+    if protected_role in member.roles:
+        await ctx.send(f"{member.mention} is protected and cannot be raped.")
+        return
 
-                # Log the action
-                gmt_time = get_time_info()
-                embed = discord.Embed(title='Rape Command Used', color=discord.Color.red())
-                embed.add_field(name='**User**', value=f'{ctx.author} ({ctx.author.id})\n')
-                embed.add_field(name='**Target**', value=f'{member} ({member.id})\n')
-                embed.add_field(name='**Action**', value='Removed all roles')
-                embed.add_field(name='**Time**', value=f'{gmt_time}\n')
-                await ctx.send(embed=embed)
+    # If the member does not have the protected role, proceed to remove all other roles
+    roles_to_remove = [role for role in member.roles if role != ctx.guild.default_role]
+
+    if roles_to_remove:
+        try:
+            # Remove all roles
+            await member.remove_roles(*roles_to_remove)
+            await ctx.send(f"{ctx.author.mention} has raped all roles from {member.mention}.")
+        except discord.Forbidden:
+            await ctx.send("I don't have permission to remove some of these roles.")
+        except discord.HTTPException:
+            await ctx.send("An error occurred while trying to remove roles.")
+    else:
+        await ctx.send(f"{member.mention} has no roles to remove.")
 
 
         # Command: Assign the "Vro Approved" role
@@ -358,6 +363,51 @@ async def trial(ctx, member: discord.Member):
         await ctx.send("I do not have permission to assign these roles.")
     except Exception as e:
         await ctx.send(f"An error occurred: {e}")
+
+@bot.command()
+@commands.has_permissions(manage_roles=True)
+async def permdemote(ctx, member: discord.Member):
+    # Hard-coded role IDs
+    staff_team_role_id = 1289125001961799690  # Replace with the actual Staff Team role ID
+    except_role_id = 1290243329145176127      # Replace with the actual Except Role ID
+
+    # Fetch roles by ID
+    staff_team_role = discord.utils.get(ctx.guild.roles, id=staff_team_role_id)
+    except_role = discord.utils.get(ctx.guild.roles, id=except_role_id)
+
+    if not staff_team_role:
+        await ctx.send(f"Staff Team role with ID {staff_team_role_id} not found in this server.")
+        return
+
+    if not except_role:
+        await ctx.send(f"Except Role with ID {except_role_id} not found in this server.")
+        return
+
+    # Get all the roles in the guild in hierarchy order
+    guild_roles = ctx.guild.roles
+    roles_to_remove = []
+
+    # Find all roles above or equal to the staff_team_role and prepare to remove them
+    for role in guild_roles:
+        if role.position >= staff_team_role.position and role in member.roles:
+            roles_to_remove.append(role)
+
+    # Remove the roles if the list isn't empty
+    if roles_to_remove:
+        await member.remove_roles(*roles_to_remove)
+        removed_roles = ", ".join([role.name for role in roles_to_remove])
+        await ctx.send(f"Removed {removed_roles} from {member.mention}.")
+    else:
+        await ctx.send(f"{member.mention} does not have {staff_team_role.name} or any roles above it.")
+        return
+
+    # Check if the member already has the except_role
+    if except_role in member.roles:
+        await ctx.send(f"{member.mention} already has {except_role.name}. No need to assign.")
+    else:
+        # Assign the except_role
+        await member.add_roles(except_role)
+        await ctx.send(f"Assigned {except_role.name} to {member.mention}.")
 
 # Start the bot
 bot.run(os.getenv('DISCORD_TOKEN'))
