@@ -1,0 +1,6 @@
+discord.py
+flask
+asyncpg
+python-dotenv
+aiohttp
+schedule
