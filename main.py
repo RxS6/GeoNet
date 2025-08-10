@@ -335,3 +335,4 @@ async def recover(ctx, user: discord.Member):
 
 keep_alive()  # Optional if you're using a web server
 bot.run(os.getenv('DISCORD_TOKEN'))  # Ensure you have your token set as an environment variable
+
