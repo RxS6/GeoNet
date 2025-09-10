@@ -279,7 +279,6 @@ async def recover(ctx, user: discord.Member):
         await ctx.send(f"Recovered all roles for {user.mention}.")
 
 
-keep_alive()  # Optional if you're using a web server
-bot.run(os.getenv('DISCORD_TOKEN'))  # Ensure you have your token set as an environment variable
+bot.run(os.getenv('DISCORD_TOKEN'))  # Make sure your DISCORD_TOKEN is set in environment
 
 
