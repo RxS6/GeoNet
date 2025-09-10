@@ -206,10 +206,7 @@ async def recover(ctx, user: discord.Member):
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
 
-    # Log the command
-    description = f"**Unmuted** {member.mention}."
-    await log_command(ctx, description, discord.Color.green())
-
+    
 # Command to ban a member
 @bot.command(name='ban')
 @commands.has_permissions(ban_members=True)
@@ -272,6 +269,7 @@ async def recover(ctx, user: discord.Member):
 
 
 bot.run(os.getenv('DISCORD_TOKEN'))  # Make sure your DISCORD_TOKEN is set in environment
+
 
 
 
