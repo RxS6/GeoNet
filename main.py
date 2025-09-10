@@ -169,10 +169,10 @@ async def permdemote(ctx, member: discord.Member):
     ]
     roles_to_remove = [ctx.guild.get_role(rid) for rid in role_ids_to_remove if ctx.guild.get_role(rid) in member.roles]
     if roles_to_remove:
-        await member.remove_roles(*roles_to_remove)
-        removed_names = ", ".join([role.name for role in roles_to_remove])
-        await ctx.send(f"Removed roles: {removed_names} from {member.mention}.")
-    else:
+    await member.remove_roles(*roles_to_remove)
+    await ctx.send(f"Removed targeted roles from {member.mention}.")
+else:
+    await ctx.send(f"{member.mention} has none of the roles to remove.")
         removed_names = "None"
         await ctx.send(f"{member.mention} has none of the roles to remove.")
     await log_command(ctx, f"**Permdemoted** {member.mention}. Roles removed: {removed_names}", discord.Color.red())
@@ -269,6 +269,7 @@ async def recover(ctx, user: discord.Member):
 
 
 bot.run(os.getenv('DISCORD_TOKEN'))  # Make sure your DISCORD_TOKEN is set in environment
+
 
 
 
