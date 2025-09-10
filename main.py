@@ -204,15 +204,7 @@ async def recover(ctx, user: discord.Member):
 
 # Keep alive and run
 keep_alive()
-bot.run(os.getenv('DISCORD_TOKEN'))= 1291458245747277955  # Mute role ID
-    mute_role = ctx.guild.get_role(mute_role_id)
-
-    if not mute_role:
-        await ctx.send("Mute role not found.")
-        return
-
-    await member.remove_roles(mute_role)
-    await ctx.send(f"{member.mention} has been unmuted.")
+bot.run(os.getenv('DISCORD_TOKEN'))
 
     # Log the command
     description = f"**Unmuted** {member.mention}."
@@ -280,5 +272,6 @@ async def recover(ctx, user: discord.Member):
 
 
 bot.run(os.getenv('DISCORD_TOKEN'))  # Make sure your DISCORD_TOKEN is set in environment
+
 
 
