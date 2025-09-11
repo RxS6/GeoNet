@@ -14,7 +14,6 @@ log_channel_id = 1415343089974902987
 staff_role1_id = 1410798804013289524
 staff_role2_id = 1410667335119016070
 autorole_id = 1410667353343000671
-trivia_role_id = 1410667328571576360  # For $trivia command
 
 removed_roles = {}
 spam_tracker = defaultdict(list)
@@ -72,14 +71,13 @@ async def remove_warning(user_id, guild_id, warning):
         )
         await conn.commit()
 
-async def check_warnings(user_id, guild_id):
+async def get_warnings(user_id, guild_id):
     async with aiosqlite.connect('roles.db') as conn:
         async with conn.execute(
             'SELECT warning FROM warnings WHERE user_id = ? AND guild_id = ?',
             (user_id, guild_id)
         ) as cursor:
-            warnings = [row[0] for row in await cursor.fetchall()]
-    return warnings
+            return [row[0] for row in await cursor.fetchall()]
 
 # =========================
 # Bot Setup
@@ -191,37 +189,36 @@ async def recover(ctx, user: discord.Member):
 # =========================
 @bot.command(name='warn')
 @commands.has_permissions(manage_roles=True)
-async def warn(ctx, member: discord.Member, *, reason: str = "No reason provided"):
+async def warn(ctx, member: discord.Member, *, reason="No reason provided"):
     await add_warning(member.id, ctx.guild.id, reason)
-    embed = discord.Embed(title="⚠️ User Warned", color=discord.Color.gold(), timestamp=datetime.utcnow())
-    embed.add_field(name="User", value=member.mention, inline=True)
-    embed.add_field(name="Reason", value=reason, inline=True)
-    embed.set_footer(text=f"By {ctx.author}")
+    embed = discord.Embed(title="⚠️ User Warned", color=discord.Color.gold())
+    embed.add_field(name="User", value=member.mention)
+    embed.add_field(name="Reason", value=reason)
     await ctx.send(embed=embed)
-    await log_command(ctx, f"**Warned** {member.mention} for: {reason}", discord.Color.orange())
+    await log_command(ctx, f"**Warned** {member.mention} | Reason: {reason}", discord.Color.orange())
 
 @bot.command(name='unwarn')
 @commands.has_permissions(manage_roles=True)
-async def unwarn(ctx, member: discord.Member, *, reason: str):
-    warnings = await check_warnings(member.id, ctx.guild.id)
-    if reason not in warnings:
-        await ctx.send(f"⚠️ No warning with that reason found for {member.mention}.")
+async def unwarn(ctx, member: discord.Member, *, reason):
+    warnings_list = await get_warnings(member.id, ctx.guild.id)
+    if reason not in warnings_list:
+        await ctx.send(f"⚠️ No warning found with that reason for {member.mention}")
         return
     await remove_warning(member.id, ctx.guild.id, reason)
-    await ctx.send(f"✅ Removed warning for {member.mention}: {reason}")
-    await log_command(ctx, f"**Unwarned** {member.mention}. Reason: {reason}", discord.Color.green())
+    await ctx.send(f"✅ Removed warning from {member.mention}: {reason}")
+    await log_command(ctx, f"**Unwarned** {member.mention} | Reason: {reason}", discord.Color.green())
 
 @bot.command(name='warnings')
 @commands.has_permissions(manage_roles=True)
 async def warnings(ctx, member: discord.Member):
-    warnings_list = await check_warnings(member.id, ctx.guild.id)
-    if warnings_list:
-        embed = discord.Embed(title=f"⚠️ Warnings for {member}", color=discord.Color.orange(), timestamp=datetime.utcnow())
-        for i, warning in enumerate(warnings_list, 1):
-            embed.add_field(name=f"#{i}", value=warning, inline=False)
-        await ctx.send(embed=embed)
-    else:
-        await ctx.send(f"✅ {member.mention} has no warnings.")
+    warnings_list = await get_warnings(member.id, ctx.guild.id)
+    if not warnings_list:
+        await ctx.send(f"{member.mention} has no warnings.")
+        return
+    embed = discord.Embed(title=f"Warnings for {member}", color=discord.Color.orange())
+    for i, w in enumerate(warnings_list, 1):
+        embed.add_field(name=f"#{i}", value=w, inline=False)
+    await ctx.send(embed=embed)
 
 # =========================
 # Moderation
@@ -230,10 +227,9 @@ async def warnings(ctx, member: discord.Member):
 @commands.has_permissions(kick_members=True)
 async def kick(ctx, member: discord.Member, *, reason="No reason provided"):
     await member.kick(reason=reason)
-    embed = discord.Embed(title="👢 User Kicked", color=discord.Color.orange(), timestamp=datetime.utcnow())
-    embed.add_field(name="User", value=member.mention, inline=True)
-    embed.add_field(name="Reason", value=reason, inline=True)
-    embed.set_footer(text=f"By {ctx.author}")
+    embed = discord.Embed(title="👢 User Kicked", color=discord.Color.orange())
+    embed.add_field(name="User", value=member.mention)
+    embed.add_field(name="Reason", value=reason)
     await ctx.send(embed=embed)
     await log_command(ctx, f"**Kicked** {member.mention} | Reason: {reason}", discord.Color.red())
 
@@ -241,10 +237,9 @@ async def kick(ctx, member: discord.Member, *, reason="No reason provided"):
 @commands.has_permissions(ban_members=True)
 async def ban(ctx, member: discord.Member, *, reason="No reason provided"):
     await member.ban(reason=reason)
-    embed = discord.Embed(title="🔨 User Banned", color=discord.Color.red(), timestamp=datetime.utcnow())
-    embed.add_field(name="User", value=member.mention, inline=True)
-    embed.add_field(name="Reason", value=reason, inline=True)
-    embed.set_footer(text=f"By {ctx.author}")
+    embed = discord.Embed(title="🔨 User Banned", color=discord.Color.red())
+    embed.add_field(name="User", value=member.mention)
+    embed.add_field(name="Reason", value=reason)
     await ctx.send(embed=embed)
     await log_command(ctx, f"**Banned** {member.mention} | Reason: {reason}", discord.Color.red())
 
@@ -294,7 +289,7 @@ async def removerole(ctx, member: discord.Member, role: discord.Role):
 async def userinfo(ctx, member: discord.Member = None):
     member = member or ctx.author
     roles = " ".join([f"<@&{r.id}>" for r in member.roles if r != ctx.guild.default_role]) or "None"
-    embed = discord.Embed(title=f"👤 User Info - {member}", color=discord.Color.blue(), timestamp=datetime.utcnow())
+    embed = discord.Embed(title=f"👤 User Info - {member}", color=discord.Color.blue())
     embed.set_thumbnail(url=member.display_avatar.url)
     embed.add_field(name="ID", value=member.id, inline=False)
     embed.add_field(name="Joined Server", value=member.joined_at.strftime("%Y-%m-%d %H:%M:%S"), inline=False)
@@ -305,7 +300,7 @@ async def userinfo(ctx, member: discord.Member = None):
 @bot.command()
 async def serverinfo(ctx):
     guild = ctx.guild
-    embed = discord.Embed(title=f"🌍 Server Info - {guild.name}", color=discord.Color.green(), timestamp=datetime.utcnow())
+    embed = discord.Embed(title=f"🌍 Server Info - {guild.name}", color=discord.Color.green())
     embed.set_thumbnail(url=guild.icon.url if guild.icon else None)
     embed.add_field(name="ID", value=guild.id, inline=False)
     embed.add_field(name="Owner", value=guild.owner.mention, inline=False)
@@ -321,8 +316,7 @@ async def help(ctx):
     embed = discord.Embed(
         title="📖 Help Menu - GeoNet",
         description="A feature-packed Discord bot by Rxs 💎",
-        color=discord.Color.blurple(),
-        timestamp=datetime.utcnow()
+        color=discord.Color.blurple()
     )
     embed.add_field(
         name="🔨 Moderation",
