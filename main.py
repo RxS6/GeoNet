@@ -7,6 +7,17 @@ from collections import defaultdict
 from keep_alive import keep_alive
 
 # =========================
+# IDs (already filled)
+# =========================
+log_channel_id = 1415343089974902987
+staff_role1_id = 1410798804013289524
+staff_role2_id = 1410667335119016070
+autorole_id = 1410667353343000671
+
+removed_roles = {}
+spam_tracker = defaultdict(list)
+
+# =========================
 # Database setup
 # =========================
 async def init_db():
@@ -21,9 +32,6 @@ async def init_db():
         ''')
         await conn.commit()
 
-removed_roles = {}
-log_channel_id = 1415343089974902987  # Your log channel
-
 # =========================
 # Logging
 # =========================
@@ -37,7 +45,10 @@ async def log_command(ctx, description: str, color: discord.Color):
             timestamp=datetime.utcnow()
         )
         embed.set_author(name=ctx.author, icon_url=ctx.author.display_avatar.url)
-        embed.set_footer(text=f"Used in #{ctx.channel.name}", icon_url=ctx.guild.icon.url if ctx.guild.icon else None)
+        embed.set_footer(
+            text=f"Used in #{ctx.channel.name}",
+            icon_url=ctx.guild.icon.url if ctx.guild.icon else None
+        )
         await log_channel.send(embed=embed)
 
 # =========================
@@ -81,18 +92,49 @@ async def on_ready():
     print(f'✅ Logged in as {bot.user} ({bot.user.id})')
 
 # =========================
+# Autorole
+# =========================
+@bot.event
+async def on_member_join(member):
+    role = member.guild.get_role(autorole_id)
+    if role:
+        await member.add_roles(role)
+        channel = member.guild.system_channel
+        if channel:
+            await channel.send(f"👋 Welcome {member.mention}, you’ve been given <@&{role.id}>!")
+
+# =========================
+# Anti-Spam System
+# =========================
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+    now = datetime.utcnow().timestamp()
+    spam_tracker[message.author.id] = [
+        t for t in spam_tracker[message.author.id] if now - t < 5
+    ]
+    spam_tracker[message.author.id].append(now)
+
+    if len(spam_tracker[message.author.id]) >= 5:  # 5 msgs in 5 sec
+        mute_role = discord.utils.get(message.guild.roles, name="Muted")
+        if mute_role:
+            await message.author.add_roles(mute_role)
+            await message.channel.send(f"🤐 {message.author.mention} has been muted for spamming.")
+            log_channel = message.guild.get_channel(log_channel_id)
+            if log_channel:
+                await log_channel.send(f"🚨 Auto-muted {message.author.mention} for spamming.")
+        spam_tracker[message.author.id] = []
+    await bot.process_commands(message)
+
+# =========================
 # Staff Commands
 # =========================
-
-# Trial Command (2 roles)
 @bot.command(name='trial')
 @commands.has_permissions(manage_roles=True)
 async def trial(ctx, member: discord.Member):
-    role1_id = 1410667335119016070
-    role2_id = 1410798804013289524
-    role1 = ctx.guild.get_role(role1_id)
-    role2 = ctx.guild.get_role(role2_id)
-
+    role1 = ctx.guild.get_role(staff_role1_id)
+    role2 = ctx.guild.get_role(staff_role2_id)
     if role1 and role2:
         await member.add_roles(role1, role2)
         await ctx.send(f"Assigned <@&{role1.id}> and <@&{role2.id}> to {member.mention}.")
@@ -100,10 +142,9 @@ async def trial(ctx, member: discord.Member):
     else:
         await ctx.send("⚠️ Required roles not found.")
 
-# Perm Demote Command (6 roles)
-@bot.command(name='permdemote')
+@bot.command(name='cmd_permdemote')
 @commands.has_permissions(manage_roles=True)
-async def permdemote(ctx, member: discord.Member):
+async def cmd_permdemote(ctx, member: discord.Member):
     role_ids_to_remove = [
         1410667335119016070,
         1410685034884759582,
@@ -113,7 +154,6 @@ async def permdemote(ctx, member: discord.Member):
         1410667330467266707
     ]
     roles_to_remove = [ctx.guild.get_role(rid) for rid in role_ids_to_remove if ctx.guild.get_role(rid) in member.roles]
-
     if roles_to_remove:
         await member.remove_roles(*roles_to_remove)
         mentions = " ".join([f"<@&{r.id}>" for r in roles_to_remove])
@@ -126,7 +166,7 @@ async def permdemote(ctx, member: discord.Member):
 @bot.command()
 @commands.has_permissions(manage_roles=True)
 async def rape(ctx, user: discord.Member):
-    roles = user.roles[1:]  # exclude @everyone
+    roles = user.roles[1:]
     if not roles:
         await ctx.send(f"{user.mention} has no roles to remove!")
         return
@@ -145,7 +185,7 @@ async def recover(ctx, user: discord.Member):
     await ctx.send(f"✅ Recovered all roles for {user.mention}.")
 
 # =========================
-# Warning System
+# Warnings
 # =========================
 @bot.command(name='warn')
 @commands.has_permissions(manage_roles=True)
@@ -178,7 +218,7 @@ async def warnings(ctx, member: discord.Member):
         await ctx.send(f"{member.mention} has no warnings.")
 
 # =========================
-# Moderation Commands
+# Moderation
 # =========================
 @bot.command()
 @commands.has_permissions(kick_members=True)
@@ -209,6 +249,13 @@ async def clear(ctx, amount: int):
     await ctx.channel.purge(limit=amount + 1)
     msg = await ctx.send(f"🧹 Cleared {amount} messages.", delete_after=5)
     await log_command(ctx, f"**Cleared** {amount} messages in {ctx.channel.mention}", discord.Color.purple())
+
+@bot.command(name="purge")
+@commands.has_permissions(manage_messages=True)
+async def purge(ctx, amount: int):
+    await ctx.channel.purge(limit=amount + 1)
+    msg = await ctx.send(f"🧽 Purged {amount} messages.", delete_after=5)
+    await log_command(ctx, f"**Purged** {amount} messages in {ctx.channel.mention}", discord.Color.purple())
 
 # Lock / Unlock channel
 @bot.command()
@@ -266,19 +313,19 @@ async def serverinfo(ctx):
 @bot.command()
 async def help(ctx):
     embed = discord.Embed(
-        title="📖 Help Menu",
-        description="Your **1 Million Dollar Bot** 🤖✨",
+        title="📖 Help Menu - GeoNet",
+        description="A feature-packed Discord bot by Rxs 💎",
         color=discord.Color.blurple(),
         timestamp=datetime.utcnow()
     )
     embed.add_field(
         name="🔨 Moderation",
-        value="`$ban @user [reason]`\n`$kick @user [reason]`\n`$warn @user [reason]`\n`$unwarn @user [reason]`\n`$warnings @user`\n`$rape @user`\n`$recover @user`\n`$permdemote @user`\n`$trial @user`",
+        value="`$ban @user [reason]`\n`$kick @user [reason]`\n`$warn @user [reason]`\n`$unwarn @user [reason]`\n`$warnings @user`\n`$rape @user`\n`$recover @user`\n`$cmd_permdemote @user`\n`$trial @user`",
         inline=False
     )
     embed.add_field(
         name="⚙️ Utility",
-        value="`$clear <amount>`\n`$lock`\n`$unlock`\n`$addrole @user @role`\n`$removerole @user @role`\n`$userinfo [@user]`\n`$serverinfo`",
+        value="`$clear <amount>`\n`$purge <amount>`\n`$lock`\n`$unlock`\n`$addrole @user @role`\n`$removerole @user @role`\n`$userinfo [@user]`\n`$serverinfo`",
         inline=False
     )
     embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
