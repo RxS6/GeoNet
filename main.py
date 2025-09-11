@@ -5,14 +5,16 @@ from discord.ext import commands
 from datetime import datetime
 from collections import defaultdict
 from keep_alive import keep_alive
+import random
 
 # =========================
-# IDs (already filled)
+# IDs
 # =========================
 log_channel_id = 1415343089974902987
 staff_role1_id = 1410798804013289524
 staff_role2_id = 1410667335119016070
 autorole_id = 1410667353343000671
+trivia_role_id = 1410667328571576360  # For $trivia command
 
 removed_roles = {}
 spam_tracker = defaultdict(list)
@@ -116,7 +118,7 @@ async def on_message(message):
     ]
     spam_tracker[message.author.id].append(now)
 
-    if len(spam_tracker[message.author.id]) >= 5:  # 5 msgs in 5 sec
+    if len(spam_tracker[message.author.id]) >= 5:
         mute_role = discord.utils.get(message.guild.roles, name="Muted")
         if mute_role:
             await message.author.add_roles(mute_role)
@@ -198,7 +200,6 @@ async def warn(ctx, member: discord.Member, *, reason: str = "No reason provided
     await ctx.send(embed=embed)
     await log_command(ctx, f"**Warned** {member.mention} for: {reason}", discord.Color.orange())
 
-
 @bot.command(name='unwarn')
 @commands.has_permissions(manage_roles=True)
 async def unwarn(ctx, member: discord.Member, *, reason: str):
@@ -209,7 +210,6 @@ async def unwarn(ctx, member: discord.Member, *, reason: str):
     await remove_warning(member.id, ctx.guild.id, reason)
     await ctx.send(f"✅ Removed warning for {member.mention}: {reason}")
     await log_command(ctx, f"**Unwarned** {member.mention}. Reason: {reason}", discord.Color.green())
-
 
 @bot.command(name='warnings')
 @commands.has_permissions(manage_roles=True)
@@ -222,6 +222,7 @@ async def warnings(ctx, member: discord.Member):
         await ctx.send(embed=embed)
     else:
         await ctx.send(f"✅ {member.mention} has no warnings.")
+
 # =========================
 # Moderation
 # =========================
@@ -252,14 +253,14 @@ async def ban(ctx, member: discord.Member, *, reason="No reason provided"):
 @commands.has_permissions(manage_messages=True)
 async def clear(ctx, amount: int):
     await ctx.channel.purge(limit=amount + 1)
-    msg = await ctx.send(f"🧹 Cleared {amount} messages.", delete_after=5)
+    await ctx.send(f"🧹 Cleared {amount} messages.", delete_after=5)
     await log_command(ctx, f"**Cleared** {amount} messages in {ctx.channel.mention}", discord.Color.purple())
 
 @bot.command(name="purge")
 @commands.has_permissions(manage_messages=True)
 async def purge(ctx, amount: int):
     await ctx.channel.purge(limit=amount + 1)
-    msg = await ctx.send(f"🧽 Purged {amount} messages.", delete_after=5)
+    await ctx.send(f"🧽 Purged {amount} messages.", delete_after=5)
     await log_command(ctx, f"**Purged** {amount} messages in {ctx.channel.mention}", discord.Color.purple())
 
 # Lock / Unlock channel
@@ -341,4 +342,3 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
-
