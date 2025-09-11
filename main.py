@@ -31,13 +31,13 @@ async def log_command(ctx, description: str, color: discord.Color):
     log_channel = ctx.guild.get_channel(log_channel_id)
     if log_channel:
         embed = discord.Embed(
-            title="Command Log",
+            title="⚡ Command Log",
             description=description,
             color=color,
             timestamp=datetime.utcnow()
         )
-        embed.set_author(name=ctx.author.name, icon_url=ctx.author.display_avatar.url)
-        embed.set_footer(text=f"Used in #{ctx.channel.name}", icon_url=ctx.guild.icon.url)
+        embed.set_author(name=ctx.author, icon_url=ctx.author.display_avatar.url)
+        embed.set_footer(text=f"Used in #{ctx.channel.name}", icon_url=ctx.guild.icon.url if ctx.guild.icon else None)
         await log_channel.send(embed=embed)
 
 # =========================
@@ -73,6 +73,7 @@ async def check_warnings(user_id, guild_id):
 # =========================
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='$', intents=intents)
+bot.remove_command("help")  # remove default help
 
 @bot.event
 async def on_ready():
@@ -130,9 +131,8 @@ async def rape(ctx, user: discord.Member):
         await ctx.send(f"{user.mention} has no roles to remove!")
         return
     removed_roles[user.id] = roles
-    for role in roles:
-        await user.remove_roles(role)
-    await ctx.send(f"Raped all roles from {user.mention} and stored them for recovery.")
+    await user.remove_roles(*roles)
+    await ctx.send(f"❌ Removed all roles from {user.mention} (stored for recovery).")
 
 @bot.command()
 @commands.has_permissions(manage_roles=True)
@@ -140,10 +140,9 @@ async def recover(ctx, user: discord.Member):
     if user.id not in removed_roles:
         await ctx.send(f"{user.mention} has no roles stored for recovery!")
         return
-    for role in removed_roles[user.id]:
-        await user.add_roles(role)
+    await user.add_roles(*removed_roles[user.id])
     removed_roles.pop(user.id)
-    await ctx.send(f"Recovered all roles for {user.mention}.")
+    await ctx.send(f"✅ Recovered all roles for {user.mention}.")
 
 # =========================
 # Warning System
@@ -152,14 +151,18 @@ async def recover(ctx, user: discord.Member):
 @commands.has_permissions(manage_roles=True)
 async def warn(ctx, member: discord.Member, *, reason: str):
     await add_warning(member.id, ctx.guild.id, reason)
-    await ctx.send(f"{member.mention} has been warned for: {reason}")
+    embed = discord.Embed(title="⚠️ User Warned", color=discord.Color.gold(), timestamp=datetime.utcnow())
+    embed.add_field(name="User", value=member.mention, inline=True)
+    embed.add_field(name="Reason", value=reason, inline=True)
+    embed.set_footer(text=f"By {ctx.author}")
+    await ctx.send(embed=embed)
     await log_command(ctx, f"**Warned** {member.mention} for: {reason}", discord.Color.orange())
 
 @bot.command(name='unwarn')
 @commands.has_permissions(manage_roles=True)
 async def unwarn(ctx, member: discord.Member, *, reason: str):
     await remove_warning(member.id, ctx.guild.id, reason)
-    await ctx.send(f"Warning removed for {member.mention}: {reason}")
+    await ctx.send(f"✅ Warning removed for {member.mention}: {reason}")
     await log_command(ctx, f"**Unwarned** {member.mention}. Reason: {reason}", discord.Color.green())
 
 @bot.command(name='warnings')
@@ -175,23 +178,37 @@ async def warnings(ctx, member: discord.Member):
         await ctx.send(f"{member.mention} has no warnings.")
 
 # =========================
-# New Commands You Wanted
+# Moderation Commands
 # =========================
-
-# Kick
 @bot.command()
 @commands.has_permissions(kick_members=True)
 async def kick(ctx, member: discord.Member, *, reason="No reason provided"):
     await member.kick(reason=reason)
-    await ctx.send(f"Kicked {member.mention} for: {reason}")
-    await log_command(ctx, f"**Kicked** {member.mention} for: {reason}", discord.Color.red())
+    embed = discord.Embed(title="👢 User Kicked", color=discord.Color.orange(), timestamp=datetime.utcnow())
+    embed.add_field(name="User", value=member.mention, inline=True)
+    embed.add_field(name="Reason", value=reason, inline=True)
+    embed.set_footer(text=f"By {ctx.author}")
+    await ctx.send(embed=embed)
+    await log_command(ctx, f"**Kicked** {member.mention} | Reason: {reason}", discord.Color.red())
+
+@bot.command()
+@commands.has_permissions(ban_members=True)
+async def ban(ctx, member: discord.Member, *, reason="No reason provided"):
+    await member.ban(reason=reason)
+    embed = discord.Embed(title="🔨 User Banned", color=discord.Color.red(), timestamp=datetime.utcnow())
+    embed.add_field(name="User", value=member.mention, inline=True)
+    embed.add_field(name="Reason", value=reason, inline=True)
+    embed.set_footer(text=f"By {ctx.author}")
+    await ctx.send(embed=embed)
+    await log_command(ctx, f"**Banned** {member.mention} | Reason: {reason}", discord.Color.red())
 
 # Clear / Purge
 @bot.command(name="clear")
 @commands.has_permissions(manage_messages=True)
 async def clear(ctx, amount: int):
     await ctx.channel.purge(limit=amount + 1)
-    await ctx.send(f"🧹 Cleared {amount} messages.", delete_after=5)
+    msg = await ctx.send(f"🧹 Cleared {amount} messages.", delete_after=5)
+    await log_command(ctx, f"**Cleared** {amount} messages in {ctx.channel.mention}", discord.Color.purple())
 
 # Lock / Unlock channel
 @bot.command()
@@ -211,20 +228,20 @@ async def unlock(ctx):
 @commands.has_permissions(manage_roles=True)
 async def addrole(ctx, member: discord.Member, role: discord.Role):
     await member.add_roles(role)
-    await ctx.send(f"Added <@&{role.id}> to {member.mention}.")
+    await ctx.send(f"✅ Added <@&{role.id}> to {member.mention}.")
 
 @bot.command()
 @commands.has_permissions(manage_roles=True)
 async def removerole(ctx, member: discord.Member, role: discord.Role):
     await member.remove_roles(role)
-    await ctx.send(f"Removed <@&{role.id}> from {member.mention}.")
+    await ctx.send(f"❌ Removed <@&{role.id}> from {member.mention}.")
 
 # Info Commands
 @bot.command()
 async def userinfo(ctx, member: discord.Member = None):
     member = member or ctx.author
     roles = " ".join([f"<@&{r.id}>" for r in member.roles if r != ctx.guild.default_role]) or "None"
-    embed = discord.Embed(title=f"User Info - {member}", color=discord.Color.blue(), timestamp=datetime.utcnow())
+    embed = discord.Embed(title=f"👤 User Info - {member}", color=discord.Color.blue(), timestamp=datetime.utcnow())
     embed.set_thumbnail(url=member.display_avatar.url)
     embed.add_field(name="ID", value=member.id, inline=False)
     embed.add_field(name="Joined Server", value=member.joined_at.strftime("%Y-%m-%d %H:%M:%S"), inline=False)
@@ -235,12 +252,36 @@ async def userinfo(ctx, member: discord.Member = None):
 @bot.command()
 async def serverinfo(ctx):
     guild = ctx.guild
-    embed = discord.Embed(title=f"Server Info - {guild.name}", color=discord.Color.green(), timestamp=datetime.utcnow())
-    embed.set_thumbnail(url=guild.icon.url if guild.icon else discord.Embed.Empty)
+    embed = discord.Embed(title=f"🌍 Server Info - {guild.name}", color=discord.Color.green(), timestamp=datetime.utcnow())
+    embed.set_thumbnail(url=guild.icon.url if guild.icon else None)
     embed.add_field(name="ID", value=guild.id, inline=False)
     embed.add_field(name="Owner", value=guild.owner.mention, inline=False)
     embed.add_field(name="Members", value=guild.member_count, inline=False)
     embed.add_field(name="Created On", value=guild.created_at.strftime("%Y-%m-%d %H:%M:%S"), inline=False)
+    await ctx.send(embed=embed)
+
+# =========================
+# Help Command
+# =========================
+@bot.command()
+async def help(ctx):
+    embed = discord.Embed(
+        title="📖 Help Menu",
+        description="Your **1 Million Dollar Bot** 🤖✨",
+        color=discord.Color.blurple(),
+        timestamp=datetime.utcnow()
+    )
+    embed.add_field(
+        name="🔨 Moderation",
+        value="`$ban @user [reason]`\n`$kick @user [reason]`\n`$warn @user [reason]`\n`$unwarn @user [reason]`\n`$warnings @user`\n`$rape @user`\n`$recover @user`\n`$permdemote @user`\n`$trial @user`",
+        inline=False
+    )
+    embed.add_field(
+        name="⚙️ Utility",
+        value="`$clear <amount>`\n`$lock`\n`$unlock`\n`$addrole @user @role`\n`$removerole @user @role`\n`$userinfo [@user]`\n`$serverinfo`",
+        inline=False
+    )
+    embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
     await ctx.send(embed=embed)
 
 # =========================
