@@ -1,76 +1,109 @@
+import os
+import aiosqlite
 import discord
 from discord.ext import commands
-import sqlite3
-import os
 from datetime import datetime
+from collections import defaultdict
+from keep_alive import keep_alive
 
-intents = discord.Intents.all()
-bot = commands.Bot(command_prefix="$", intents=intents)
-bot.remove_command("help")
-
-# ===============================
+# =========================
 # Database setup
-# ===============================
-conn = sqlite3.connect('warnings.db')
-c = conn.cursor()
-c.execute('''CREATE TABLE IF NOT EXISTS warnings
-             (user_id INTEGER, guild_id INTEGER, reason TEXT)''')
-conn.commit()
+# =========================
+async def init_db():
+    async with aiosqlite.connect('roles.db') as conn:
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS warnings (
+                user_id INTEGER NOT NULL,
+                guild_id INTEGER NOT NULL,
+                warning TEXT NOT NULL,
+                PRIMARY KEY (user_id, guild_id, warning)
+            )
+        ''')
+        await conn.commit()
 
-async def add_warning(user_id, guild_id, reason):
-    c.execute("INSERT INTO warnings VALUES (?, ?, ?)", (user_id, guild_id, reason))
-    conn.commit()
+removed_roles = {}
+log_channel_id = 1415343089974902987  # Your log channel
 
-async def remove_warning(user_id, guild_id, reason):
-    c.execute("DELETE FROM warnings WHERE user_id = ? AND guild_id = ? AND reason = ?",
-              (user_id, guild_id, reason))
-    conn.commit()
-
-async def check_warnings(user_id, guild_id):
-    c.execute("SELECT reason FROM warnings WHERE user_id = ? AND guild_id = ?",
-              (user_id, guild_id))
-    return [row[0] for row in c.fetchall()]
-
-# ===============================
-# Logging helper
-# ===============================
-async def log_command(ctx, description, color=discord.Color.blue()):
-    log_channel_id = 1415343089974902987
+# =========================
+# Logging
+# =========================
+async def log_command(ctx, description: str, color: discord.Color):
     log_channel = ctx.guild.get_channel(log_channel_id)
     if log_channel:
         embed = discord.Embed(
+            title="Command Log",
             description=description,
             color=color,
             timestamp=datetime.utcnow()
         )
-        embed.set_author(name=ctx.author, icon_url=ctx.author.avatar.url if ctx.author.avatar else discord.Embed.Empty)
+        embed.set_author(name=ctx.author.name, icon_url=ctx.author.display_avatar.url)
+        embed.set_footer(text=f"Used in #{ctx.channel.name}", icon_url=ctx.guild.icon.url)
         await log_channel.send(embed=embed)
 
-# ===============================
-# Trial Command
-# ===============================
+# =========================
+# DB Functions for Warnings
+# =========================
+async def add_warning(user_id, guild_id, warning):
+    async with aiosqlite.connect('roles.db') as conn:
+        await conn.execute(
+            'INSERT OR IGNORE INTO warnings (user_id, guild_id, warning) VALUES (?, ?, ?)',
+            (user_id, guild_id, warning)
+        )
+        await conn.commit()
+
+async def remove_warning(user_id, guild_id, warning):
+    async with aiosqlite.connect('roles.db') as conn:
+        await conn.execute(
+            'DELETE FROM warnings WHERE user_id = ? AND guild_id = ? AND warning = ?',
+            (user_id, guild_id, warning)
+        )
+        await conn.commit()
+
+async def check_warnings(user_id, guild_id):
+    async with aiosqlite.connect('roles.db') as conn:
+        async with conn.execute(
+            'SELECT warning FROM warnings WHERE user_id = ? AND guild_id = ?',
+            (user_id, guild_id)
+        ) as cursor:
+            warnings = [row[0] for row in await cursor.fetchall()]
+    return warnings
+
+# =========================
+# Bot Setup
+# =========================
+intents = discord.Intents.all()
+bot = commands.Bot(command_prefix='$', intents=intents)
+
+@bot.event
+async def on_ready():
+    await init_db()
+    print(f'✅ Logged in as {bot.user} ({bot.user.id})')
+
+# =========================
+# Staff Commands
+# =========================
+
+# Trial Command (2 roles)
 @bot.command(name='trial')
 @commands.has_permissions(manage_roles=True)
 async def trial(ctx, member: discord.Member):
     role1_id = 1410667335119016070
     role2_id = 1410798804013289524
-
     role1 = ctx.guild.get_role(role1_id)
     role2 = ctx.guild.get_role(role2_id)
 
     if role1 and role2:
         await member.add_roles(role1, role2)
-        await ctx.send(f"Assigned {role1.name} and {role2.name} to {member.mention}.")
-        description = f"**Assigned staff roles** to {member.mention}."
-        await log_command(ctx, description, discord.Color.blue())
+        await ctx.send(f"Assigned <@&{role1.id}> and <@&{role2.id}> to {member.mention}.")
+        await log_command(ctx, f"**Assigned trial roles** to {member.mention}.", discord.Color.blue())
+    else:
+        await ctx.send("⚠️ Required roles not found.")
 
-# ===============================
-# Permanent Demote Command
-# ===============================
+# Perm Demote Command (6 roles)
 @bot.command(name='permdemote')
 @commands.has_permissions(manage_roles=True)
 async def permdemote(ctx, member: discord.Member):
-    roles_to_remove_ids = [
+    role_ids_to_remove = [
         1410667335119016070,
         1410685034884759582,
         1410667334246469715,
@@ -78,60 +111,53 @@ async def permdemote(ctx, member: discord.Member):
         1410667331901718639,
         1410667330467266707
     ]
-    roles_to_remove = [ctx.guild.get_role(rid) for rid in roles_to_remove_ids if ctx.guild.get_role(rid) in member.roles]
+    roles_to_remove = [ctx.guild.get_role(rid) for rid in role_ids_to_remove if ctx.guild.get_role(rid) in member.roles]
 
     if roles_to_remove:
         await member.remove_roles(*roles_to_remove)
-        await ctx.send(f"Removed targeted roles from {member.mention}.")
-        description = f"**Demoted** {member.mention} (removed roles)."
-        await log_command(ctx, description, discord.Color.red())
+        mentions = " ".join([f"<@&{r.id}>" for r in roles_to_remove])
+        await ctx.send(f"Removed {mentions} from {member.mention}.")
+        await log_command(ctx, f"**Permdemoted** {member.mention}. Roles removed: {mentions}", discord.Color.red())
     else:
-        await ctx.send(f"{member.mention} does not have any of the targeted roles.")
+        await ctx.send(f"{member.mention} has none of the target roles.")
 
-# ===============================
-# Rape & Recover Commands
-# ===============================
-removed_roles = {}
-
+# Rape / Recover
 @bot.command()
 @commands.has_permissions(manage_roles=True)
 async def rape(ctx, user: discord.Member):
-    roles = user.roles[1:]  # skip @everyone
+    roles = user.roles[1:]  # exclude @everyone
     if not roles:
         await ctx.send(f"{user.mention} has no roles to remove!")
         return
     removed_roles[user.id] = roles
-    await user.remove_roles(*roles)
-    await ctx.send(f"Removed all roles from {user.mention}.")
-    await log_command(ctx, f"**Removed all roles** from {user.mention}", discord.Color.red())
+    for role in roles:
+        await user.remove_roles(role)
+    await ctx.send(f"Raped all roles from {user.mention} and stored them for recovery.")
 
 @bot.command()
 @commands.has_permissions(manage_roles=True)
 async def recover(ctx, user: discord.Member):
     if user.id not in removed_roles:
-        await ctx.send(f"No roles stored for {user.mention}. Use `rape` before recover.")
+        await ctx.send(f"{user.mention} has no roles stored for recovery!")
         return
-    await user.add_roles(*removed_roles[user.id])
-    await ctx.send(f"Restored roles to {user.mention}.")
-    await log_command(ctx, f"**Restored roles** to {user.mention}", discord.Color.green())
-    del removed_roles[user.id]
+    for role in removed_roles[user.id]:
+        await user.add_roles(role)
+    removed_roles.pop(user.id)
+    await ctx.send(f"Recovered all roles for {user.mention}.")
 
-# ===============================
-# Warn System
-# ===============================
+# =========================
+# Warning System
+# =========================
 @bot.command(name='warn')
 @commands.has_permissions(manage_roles=True)
-async def warn(ctx, member: discord.Member, *, reason: str = "No reason provided"):
+async def warn(ctx, member: discord.Member, *, reason: str):
     await add_warning(member.id, ctx.guild.id, reason)
     await ctx.send(f"{member.mention} has been warned for: {reason}")
     await log_command(ctx, f"**Warned** {member.mention} for: {reason}", discord.Color.orange())
 
 @bot.command(name='unwarn')
 @commands.has_permissions(manage_roles=True)
-async def unwarn(ctx, member: discord.Member, *, reason: str = None):
-    if not reason:
-        await ctx.send("❌ Please provide the same reason used when warning.")
-        return
+async def unwarn(ctx, member: discord.Member, *, reason: str):
     await remove_warning(member.id, ctx.guild.id, reason)
     await ctx.send(f"Warning removed for {member.mention}: {reason}")
     await log_command(ctx, f"**Unwarned** {member.mention}. Reason: {reason}", discord.Color.green())
@@ -141,98 +167,84 @@ async def unwarn(ctx, member: discord.Member, *, reason: str = None):
 async def warnings(ctx, member: discord.Member):
     warnings_list = await check_warnings(member.id, ctx.guild.id)
     if warnings_list:
-        embed = discord.Embed(
-            title=f"Warnings for {member.name}",
-            color=discord.Color.orange(),
-            timestamp=datetime.utcnow()
-        )
-        if member.avatar:
-            embed.set_thumbnail(url=member.avatar.url)
+        embed = discord.Embed(title=f"Warnings for {member.name}", color=discord.Color.orange(), timestamp=datetime.utcnow())
         for i, warning in enumerate(warnings_list, 1):
             embed.add_field(name=f"Warning {i}", value=warning, inline=False)
         await ctx.send(embed=embed)
     else:
         await ctx.send(f"{member.mention} has no warnings.")
-    await log_command(ctx, f"**Checked warnings** for {member.mention}", discord.Color.blue())
 
-# ===============================
-# Ban / Unban Commands
-# ===============================
-@bot.command(name="ban")
-@commands.has_permissions(ban_members=True)
-async def ban(ctx, member: discord.Member, *, reason="No reason provided"):
-    await member.ban(reason=reason)
-    await ctx.send(f"{member.mention} has been banned. Reason: {reason}")
-    await log_command(ctx, f"**Banned** {member.mention} for: {reason}", discord.Color.red())
+# =========================
+# New Commands You Wanted
+# =========================
 
-@bot.command(name="unban")
-@commands.has_permissions(ban_members=True)
-async def unban(ctx, *, member_name):
-    banned_users = await ctx.guild.bans()
-    for ban_entry in banned_users:
-        user = ban_entry.user
-        if user.name == member_name:
-            await ctx.guild.unban(user)
-            await ctx.send(f"Unbanned {user.mention}")
-            await log_command(ctx, f"**Unbanned** {user.mention}", discord.Color.green())
-            return
-    await ctx.send(f"User {member_name} not found in banned list.")
+# Kick
+@bot.command()
+@commands.has_permissions(kick_members=True)
+async def kick(ctx, member: discord.Member, *, reason="No reason provided"):
+    await member.kick(reason=reason)
+    await ctx.send(f"Kicked {member.mention} for: {reason}")
+    await log_command(ctx, f"**Kicked** {member.mention} for: {reason}", discord.Color.red())
 
-# ===============================
-# Custom Help Command
-# ===============================
-@bot.command(name="help")
-async def help_command(ctx):
-    embed = discord.Embed(
-        title="📖 Bot Commands",
-        description="Here are the available commands:",
-        color=discord.Color.purple()
-    )
-    embed.add_field(name="$trial @user", value="Assigns trial roles.", inline=False)
-    embed.add_field(name="$permdemote @user", value="Removes staff roles (demotion).", inline=False)
-    embed.add_field(name="$rape @user", value="Removes all roles from a user.", inline=False)
-    embed.add_field(name="$recover @user", value="Restores roles removed with `rape`.", inline=False)
-    embed.add_field(name="$warn @user [reason]", value="Warn a user.", inline=False)
-    embed.add_field(name="$unwarn @user [reason]", value="Remove a warning.", inline=False)
-    embed.add_field(name="$warnings @user", value="Show all warnings of a user.", inline=False)
-    embed.add_field(name="$ban @user [reason]", value="Ban a user.", inline=False)
-    embed.add_field(name="$unban username", value="Unban a user by name.", inline=False)
+# Clear / Purge
+@bot.command(name="clear")
+@commands.has_permissions(manage_messages=True)
+async def clear(ctx, amount: int):
+    await ctx.channel.purge(limit=amount + 1)
+    await ctx.send(f"🧹 Cleared {amount} messages.", delete_after=5)
+
+# Lock / Unlock channel
+@bot.command()
+@commands.has_permissions(manage_channels=True)
+async def lock(ctx):
+    await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=False)
+    await ctx.send("🔒 Channel locked.")
+
+@bot.command()
+@commands.has_permissions(manage_channels=True)
+async def unlock(ctx):
+    await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=True)
+    await ctx.send("🔓 Channel unlocked.")
+
+# Role Management
+@bot.command()
+@commands.has_permissions(manage_roles=True)
+async def addrole(ctx, member: discord.Member, role: discord.Role):
+    await member.add_roles(role)
+    await ctx.send(f"Added <@&{role.id}> to {member.mention}.")
+
+@bot.command()
+@commands.has_permissions(manage_roles=True)
+async def removerole(ctx, member: discord.Member, role: discord.Role):
+    await member.remove_roles(role)
+    await ctx.send(f"Removed <@&{role.id}> from {member.mention}.")
+
+# Info Commands
+@bot.command()
+async def userinfo(ctx, member: discord.Member = None):
+    member = member or ctx.author
+    roles = " ".join([f"<@&{r.id}>" for r in member.roles if r != ctx.guild.default_role]) or "None"
+    embed = discord.Embed(title=f"User Info - {member}", color=discord.Color.blue(), timestamp=datetime.utcnow())
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.add_field(name="ID", value=member.id, inline=False)
+    embed.add_field(name="Joined Server", value=member.joined_at.strftime("%Y-%m-%d %H:%M:%S"), inline=False)
+    embed.add_field(name="Account Created", value=member.created_at.strftime("%Y-%m-%d %H:%M:%S"), inline=False)
+    embed.add_field(name="Roles", value=roles, inline=False)
     await ctx.send(embed=embed)
 
-# ===============================
-# Error Handler
-# ===============================
-@bot.event
-async def on_command_error(ctx, error):
-    if isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send(f"❌ Missing argument: `{error.param.name}`. Use `$help` for command usage.")
-    elif isinstance(error, commands.MissingPermissions):
-        await ctx.send("❌ You don’t have permission to use this command.")
-    elif isinstance(error, commands.CommandNotFound):
-        await ctx.send("❌ Command not found. Use `$help` to see available commands.")
-    elif isinstance(error, commands.BadArgument):
-        await ctx.send("❌ Invalid argument. Please check and try again.")
-    else:
-        await ctx.send("⚠️ An unexpected error occurred. Please try again later.")
-        raise error
+@bot.command()
+async def serverinfo(ctx):
+    guild = ctx.guild
+    embed = discord.Embed(title=f"Server Info - {guild.name}", color=discord.Color.green(), timestamp=datetime.utcnow())
+    embed.set_thumbnail(url=guild.icon.url if guild.icon else discord.Embed.Empty)
+    embed.add_field(name="ID", value=guild.id, inline=False)
+    embed.add_field(name="Owner", value=guild.owner.mention, inline=False)
+    embed.add_field(name="Members", value=guild.member_count, inline=False)
+    embed.add_field(name="Created On", value=guild.created_at.strftime("%Y-%m-%d %H:%M:%S"), inline=False)
+    await ctx.send(embed=embed)
 
-# ===============================
+# =========================
 # Run Bot
-# ===============================
-def keep_alive():
-    from flask import Flask
-    from threading import Thread
-    app = Flask('')
-
-    @app.route('/')
-    def home():
-        return "Bot is alive!"
-
-    def run():
-        app.run(host='0.0.0.0', port=8080)
-
-    t = Thread(target=run)
-    t.start()
-
+# =========================
 keep_alive()
-bot.run(os.getenv("DISCORD_TOKEN"))
+bot.run(os.getenv('DISCORD_TOKEN'))
