@@ -5,86 +5,112 @@ from discord.ext import commands
 from datetime import datetime
 from collections import defaultdict
 from keep_alive import keep_alive
-import random
+import asyncio
 
 # =========================
-# IDs
+# CONFIG / IDS
 # =========================
 log_channel_id = 1415343089974902987
 staff_role1_id = 1410798804013289524
 staff_role2_id = 1410667335119016070
 autorole_id = 1410667353343000671
 
-removed_roles = {}
-spam_tracker = defaultdict(list)
+# storage for ephemeral features
+removed_roles = {}            # for rape/recover command
+spam_tracker = defaultdict(list)  # anti-spam tracker
+
+DB_PATH = "roles.db"
 
 # =========================
-# Database setup
+# DATABASE (cases table)
 # =========================
 async def init_db():
-    async with aiosqlite.connect('roles.db') as conn:
+    async with aiosqlite.connect(DB_PATH) as conn:
         await conn.execute('''
-            CREATE TABLE IF NOT EXISTS warnings (
-                user_id INTEGER NOT NULL,
+            CREATE TABLE IF NOT EXISTS cases (
+                case_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 guild_id INTEGER NOT NULL,
-                warning TEXT NOT NULL,
-                PRIMARY KEY (user_id, guild_id, warning)
+                user_id INTEGER NOT NULL,
+                moderator_id INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                reason TEXT,
+                timestamp TEXT
             )
         ''')
         await conn.commit()
 
-# =========================
-# Logging
-# =========================
-async def log_command(ctx, description: str, color: discord.Color):
-    log_channel = ctx.guild.get_channel(log_channel_id)
-    if log_channel:
-        embed = discord.Embed(
-            title="⚡ Command Log",
-            description=description,
-            color=color,
-            timestamp=datetime.utcnow()
-        )
-        embed.set_author(name=ctx.author, icon_url=ctx.author.display_avatar.url)
-        embed.set_footer(
-            text=f"Used in #{ctx.channel.name}",
-            icon_url=ctx.guild.icon.url if ctx.guild.icon else None
-        )
-        await log_channel.send(embed=embed)
-
-# =========================
-# DB Functions for Warnings
-# =========================
-async def add_warning(user_id, guild_id, warning):
-    async with aiosqlite.connect('roles.db') as conn:
+async def add_case(guild_id: int, user_id: int, moderator_id: int, action: str, reason: str):
+    ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    async with aiosqlite.connect(DB_PATH) as conn:
         await conn.execute(
-            'INSERT OR IGNORE INTO warnings (user_id, guild_id, warning) VALUES (?, ?, ?)',
-            (user_id, guild_id, warning)
+            'INSERT INTO cases (guild_id, user_id, moderator_id, action, reason, timestamp) VALUES (?, ?, ?, ?, ?, ?)',
+            (guild_id, user_id, moderator_id, action, reason, ts)
         )
         await conn.commit()
+        async with conn.execute('SELECT last_insert_rowid()') as cur:
+            row = await cur.fetchone()
+            return row[0] if row else None
 
-async def remove_warning(user_id, guild_id, warning):
-    async with aiosqlite.connect('roles.db') as conn:
-        await conn.execute(
-            'DELETE FROM warnings WHERE user_id = ? AND guild_id = ? AND warning = ?',
-            (user_id, guild_id, warning)
-        )
-        await conn.commit()
-
-async def get_warnings(user_id, guild_id):
-    async with aiosqlite.connect('roles.db') as conn:
+async def get_user_cases(guild_id: int, user_id: int):
+    async with aiosqlite.connect(DB_PATH) as conn:
         async with conn.execute(
-            'SELECT warning FROM warnings WHERE user_id = ? AND guild_id = ?',
-            (user_id, guild_id)
+            'SELECT case_id, moderator_id, action, reason, timestamp FROM cases WHERE guild_id = ? AND user_id = ? ORDER BY case_id ASC',
+            (guild_id, user_id)
         ) as cursor:
-            return [row[0] for row in await cursor.fetchall()]
+            return await cursor.fetchall()
+
+async def get_case_by_id(guild_id: int, case_id: int):
+    async with aiosqlite.connect(DB_PATH) as conn:
+        async with conn.execute(
+            'SELECT case_id, guild_id, user_id, moderator_id, action, reason, timestamp FROM cases WHERE case_id = ? AND guild_id = ?',
+            (case_id, guild_id)
+        ) as cur:
+            return await cur.fetchone()
+
+async def remove_case(case_id: int):
+    async with aiosqlite.connect(DB_PATH) as conn:
+        await conn.execute('DELETE FROM cases WHERE case_id = ?', (case_id,))
+        await conn.commit()
+
+async def get_case_counts(guild_id: int, user_id: int):
+    async with aiosqlite.connect(DB_PATH) as conn:
+        async with conn.execute(
+            'SELECT action, COUNT(*) FROM cases WHERE guild_id = ? AND user_id = ? GROUP BY action',
+            (guild_id, user_id)
+        ) as cur:
+            rows = await cur.fetchall()
+            counts = {"Warn": 0, "Mute": 0, "Kick": 0, "Ban": 0}
+            for action, cnt in rows:
+                if action in counts:
+                    counts[action] = cnt
+            return counts
 
 # =========================
-# Bot Setup
+# LOGGING helper
+# =========================
+async def log_command(ctx, description: str, color: discord.Color = discord.Color.blurple()):
+    try:
+        log_channel = ctx.guild.get_channel(log_channel_id)
+        if log_channel:
+            embed = discord.Embed(
+                title="⚡ Command Log",
+                description=description,
+                color=color,
+                timestamp=datetime.utcnow()
+            )
+            embed.set_author(name=str(ctx.author), icon_url=ctx.author.display_avatar.url)
+            embed.set_footer(text=f"Used in #{ctx.channel.name}", icon_url=ctx.guild.icon.url if ctx.guild.icon else None)
+            await log_channel.send(embed=embed)
+    except Exception:
+        # avoid crashing if logging fails
+        pass
+
+# =========================
+# BOT setup
 # =========================
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='$', intents=intents)
-bot.remove_command("help")  # remove default help
+bot.remove_command("help")
 
 @bot.event
 async def on_ready():
@@ -98,37 +124,47 @@ async def on_ready():
 async def on_member_join(member):
     role = member.guild.get_role(autorole_id)
     if role:
-        await member.add_roles(role)
+        try:
+            await member.add_roles(role)
+        except Exception:
+            pass
         channel = member.guild.system_channel
         if channel:
             await channel.send(f"👋 Welcome {member.mention}, you’ve been given <@&{role.id}>!")
 
 # =========================
-# Anti-Spam System
+# Anti-spam (very simple)
 # =========================
 @bot.event
 async def on_message(message):
     if message.author.bot:
         return
     now = datetime.utcnow().timestamp()
-    spam_tracker[message.author.id] = [
-        t for t in spam_tracker[message.author.id] if now - t < 5
-    ]
+    last_times = spam_tracker[message.author.id]
+    # keep only last 5 seconds
+    spam_tracker[message.author.id] = [t for t in last_times if now - t < 5]
     spam_tracker[message.author.id].append(now)
 
     if len(spam_tracker[message.author.id]) >= 5:
         mute_role = discord.utils.get(message.guild.roles, name="Muted")
         if mute_role:
-            await message.author.add_roles(mute_role)
+            try:
+                await message.author.add_roles(mute_role)
+            except Exception:
+                pass
+            await add_case(message.guild.id, message.author.id, bot.user.id, "Mute", "Auto-muted for spamming")
             await message.channel.send(f"🤐 {message.author.mention} has been muted for spamming.")
-            log_channel = message.guild.get_channel(log_channel_id)
-            if log_channel:
-                await log_channel.send(f"🚨 Auto-muted {message.author.mention} for spamming.")
+            try:
+                log_channel = message.guild.get_channel(log_channel_id)
+                if log_channel:
+                    await log_channel.send(f"🚨 Auto-muted {message.author.mention} for spamming.")
+            except Exception:
+                pass
         spam_tracker[message.author.id] = []
     await bot.process_commands(message)
 
 # =========================
-# Staff Commands
+# STAFF / FUN commands (trial, permdemote, rape/recover)
 # =========================
 @bot.command(name='trial')
 @commands.has_permissions(manage_roles=True)
@@ -138,9 +174,9 @@ async def trial(ctx, member: discord.Member):
     if role1 and role2:
         await member.add_roles(role1, role2)
         await ctx.send(f"Assigned <@&{role1.id}> and <@&{role2.id}> to {member.mention}.")
-        await log_command(ctx, f"**Assigned trial roles** to {member.mention}.", discord.Color.blue())
+        await log_command(ctx, f"Assigned trial roles to {member.mention}.", discord.Color.blue())
     else:
-        await ctx.send("⚠️ Required roles not found.")
+        await ctx.send("⚠️ Required trial roles not found.")
 
 @bot.command(name='cmd_permdemote')
 @commands.has_permissions(manage_roles=True)
@@ -158,20 +194,22 @@ async def cmd_permdemote(ctx, member: discord.Member):
         await member.remove_roles(*roles_to_remove)
         mentions = " ".join([f"<@&{r.id}>" for r in roles_to_remove])
         await ctx.send(f"Removed {mentions} from {member.mention}.")
-        await log_command(ctx, f"**Permdemoted** {member.mention}. Roles removed: {mentions}", discord.Color.red())
+        await log_command(ctx, f"Permdemoted {member.mention}. Roles removed: {mentions}", discord.Color.red())
     else:
         await ctx.send(f"{member.mention} has none of the target roles.")
 
-# Rape / Recover
 @bot.command()
 @commands.has_permissions(manage_roles=True)
 async def rape(ctx, user: discord.Member):
-    roles = user.roles[1:]
+    roles = user.roles[1:]  # exclude @everyone
     if not roles:
         await ctx.send(f"{user.mention} has no roles to remove!")
         return
     removed_roles[user.id] = roles
-    await user.remove_roles(*roles)
+    try:
+        await user.remove_roles(*roles)
+    except Exception:
+        pass
     await ctx.send(f"❌ Removed all roles from {user.mention} (stored for recovery).")
 
 @bot.command()
@@ -180,85 +218,129 @@ async def recover(ctx, user: discord.Member):
     if user.id not in removed_roles:
         await ctx.send(f"{user.mention} has no roles stored for recovery!")
         return
-    await user.add_roles(*removed_roles[user.id])
-    removed_roles.pop(user.id)
+    try:
+        await user.add_roles(*removed_roles[user.id])
+    except Exception:
+        pass
+    removed_roles.pop(user.id, None)
     await ctx.send(f"✅ Recovered all roles for {user.mention}.")
 
 # =========================
-# Warnings
+# CASE-BASED moderation (warn / unwarn / warnings / mute / kick / ban)
 # =========================
 @bot.command(name='warn')
 @commands.has_permissions(manage_roles=True)
-async def warn(ctx, member: discord.Member, *, reason="No reason provided"):
-    await add_warning(member.id, ctx.guild.id, reason)
-    embed = discord.Embed(title="⚠️ User Warned", color=discord.Color.gold())
-    embed.add_field(name="User", value=member.mention)
-    embed.add_field(name="Reason", value=reason)
+async def warn(ctx, member: discord.Member, *, reason: str = "No reason provided"):
+    case_id = await add_case(ctx.guild.id, member.id, ctx.author.id, "Warn", reason)
+    counts = await get_case_counts(ctx.guild.id, member.id)
+    embed = discord.Embed(color=discord.Color.gold(), timestamp=datetime.utcnow())
+    embed.description = f"<:check:773218860840648725> `Case #{case_id}` {member.mention} has been warned.\n\n**Reason:** {reason}\n\nWarned: {counts['Warn']} | Muted: {counts['Mute']} | Kicked: {counts['Kick']} | Banned: {counts['Ban']}"
     await ctx.send(embed=embed)
-    await log_command(ctx, f"**Warned** {member.mention} | Reason: {reason}", discord.Color.orange())
-
-@bot.command(name='unwarn')
-@commands.has_permissions(manage_roles=True)
-async def unwarn(ctx, member: discord.Member, *, reason):
-    warnings_list = await get_warnings(member.id, ctx.guild.id)
-    if reason not in warnings_list:
-        await ctx.send(f"⚠️ No warning found with that reason for {member.mention}")
-        return
-    await remove_warning(member.id, ctx.guild.id, reason)
-    await ctx.send(f"✅ Removed warning from {member.mention}: {reason}")
-    await log_command(ctx, f"**Unwarned** {member.mention} | Reason: {reason}", discord.Color.green())
+    await log_command(ctx, f"Warned {member} | Case #{case_id} | Reason: {reason}", discord.Color.orange())
 
 @bot.command(name='warnings')
 @commands.has_permissions(manage_roles=True)
-async def warnings(ctx, member: discord.Member):
-    warnings_list = await get_warnings(member.id, ctx.guild.id)
-    if not warnings_list:
-        await ctx.send(f"{member.mention} has no warnings.")
-        return
-    embed = discord.Embed(title=f"Warnings for {member}", color=discord.Color.orange())
-    for i, w in enumerate(warnings_list, 1):
-        embed.add_field(name=f"#{i}", value=w, inline=False)
+async def warnings_cmd(ctx, member: discord.Member = None):
+    member = member or ctx.author
+    cases = await get_user_cases(ctx.guild.id, member.id)
+    if not cases:
+        return await ctx.send(f"✅ {member.mention} has no cases.")
+    counts = await get_case_counts(ctx.guild.id, member.id)
+    embed = discord.Embed(title=f"📋 Cases for {member}", color=discord.Color.orange(), timestamp=datetime.utcnow())
+    for cid, mod_id, action, reason, ts in cases:
+        moderator = ctx.guild.get_member(mod_id)
+        mod_name = str(moderator) if moderator else f"<@{mod_id}>"
+        embed.add_field(name=f"Case #{cid} — {action}", value=f"**Moderator:** {mod_name}\n**Reason:** {reason}\n**At:** {ts}", inline=False)
+    embed.set_footer(text=f"Warned: {counts['Warn']} | Muted: {counts['Mute']} | Kicked: {counts['Kick']} | Banned: {counts['Ban']}")
     await ctx.send(embed=embed)
 
-# =========================
-# Moderation
-# =========================
-@bot.command()
+@bot.command(name='unwarn')
+@commands.has_permissions(manage_roles=True)
+async def unwarn_cmd(ctx, case_id: int):
+    case = await get_case_by_id(ctx.guild.id, case_id)
+    if not case:
+        return await ctx.send("⚠️ Case not found.")
+    cid, guild_id, user_id, mod_id, action, reason, ts = case
+    if action != "Warn":
+        return await ctx.send("⚠️ That case is not a warn-type case.")
+    member = ctx.guild.get_member(user_id)
+    # Confirm
+    prompt = await ctx.send(
+        f"<@{ctx.author.id}>, are you sure you want to remove this punishment? (yes/no)\n"
+        f"**Member:** {member if member else f'<@{user_id}>'}\n**Action:** Warn\n**Reason:** {reason}"
+    )
+
+    def check(m):
+        return m.author == ctx.author and m.channel == ctx.channel and m.content.lower() in ("yes", "no")
+
+    try:
+        reply = await bot.wait_for('message', check=check, timeout=30.0)
+    except asyncio.TimeoutError:
+        return await ctx.send("⏳ Confirmation timed out. Action cancelled.")
+
+    if reply.content.lower() == "yes":
+        await remove_case(case_id)
+        await ctx.send(f"<:check:773218860840648725> Case #{case_id} for **{member if member else f'<@{user_id}>'}** has been removed.")
+        await log_command(ctx, f"Removed case #{case_id} for user {user_id}", discord.Color.green())
+    else:
+        await ctx.send("❌ Action cancelled.")
+
+# Mute (manual)
+@bot.command(name='mute')
+@commands.has_permissions(manage_roles=True)
+async def mute_cmd(ctx, member: discord.Member, *, reason: str = "No reason provided"):
+    mute_role = discord.utils.get(ctx.guild.roles, name="Muted")
+    if not mute_role:
+        return await ctx.send("⚠️ No 'Muted' role found on this server.")
+    try:
+        await member.add_roles(mute_role)
+    except Exception:
+        pass
+    case_id = await add_case(ctx.guild.id, member.id, ctx.author.id, "Mute", reason)
+    counts = await get_case_counts(ctx.guild.id, member.id)
+    await ctx.send(f"🤐 Muted {member.mention} | Case #{case_id} | Reason: {reason}\nWarned: {counts['Warn']} | Muted: {counts['Mute']} | Kicked: {counts['Kick']} | Banned: {counts['Ban']}")
+    await log_command(ctx, f"Muted {member} | Case #{case_id} | Reason: {reason}", discord.Color.orange())
+
+# Kick / Ban (tracked)
+@bot.command(name='kick')
 @commands.has_permissions(kick_members=True)
-async def kick(ctx, member: discord.Member, *, reason="No reason provided"):
-    await member.kick(reason=reason)
-    embed = discord.Embed(title="👢 User Kicked", color=discord.Color.orange())
-    embed.add_field(name="User", value=member.mention)
-    embed.add_field(name="Reason", value=reason)
-    await ctx.send(embed=embed)
-    await log_command(ctx, f"**Kicked** {member.mention} | Reason: {reason}", discord.Color.red())
+async def kick_cmd(ctx, member: discord.Member, *, reason: str = "No reason provided"):
+    try:
+        await member.kick(reason=reason)
+    except Exception:
+        pass
+    case_id = await add_case(ctx.guild.id, member.id, ctx.author.id, "Kick", reason)
+    await ctx.send(f"👢 Kicked {member.mention} | Case #{case_id} | Reason: {reason}")
+    await log_command(ctx, f"Kicked {member} | Case #{case_id} | Reason: {reason}", discord.Color.red())
 
-@bot.command()
+@bot.command(name='ban')
 @commands.has_permissions(ban_members=True)
-async def ban(ctx, member: discord.Member, *, reason="No reason provided"):
-    await member.ban(reason=reason)
-    embed = discord.Embed(title="🔨 User Banned", color=discord.Color.red())
-    embed.add_field(name="User", value=member.mention)
-    embed.add_field(name="Reason", value=reason)
-    await ctx.send(embed=embed)
-    await log_command(ctx, f"**Banned** {member.mention} | Reason: {reason}", discord.Color.red())
+async def ban_cmd(ctx, member: discord.Member, *, reason: str = "No reason provided"):
+    try:
+        await member.ban(reason=reason)
+    except Exception:
+        pass
+    case_id = await add_case(ctx.guild.id, member.id, ctx.author.id, "Ban", reason)
+    await ctx.send(f"🔨 Banned {member.mention} | Case #{case_id} | Reason: {reason}")
+    await log_command(ctx, f"Banned {member} | Case #{case_id} | Reason: {reason}", discord.Color.red())
 
-# Clear / Purge
+# =========================
+# Utility: clear / purge / lock / unlock / role management
+# =========================
 @bot.command(name="clear")
 @commands.has_permissions(manage_messages=True)
-async def clear(ctx, amount: int):
+async def clear_cmd(ctx, amount: int):
     await ctx.channel.purge(limit=amount + 1)
     await ctx.send(f"🧹 Cleared {amount} messages.", delete_after=5)
-    await log_command(ctx, f"**Cleared** {amount} messages in {ctx.channel.mention}", discord.Color.purple())
+    await log_command(ctx, f"Cleared {amount} messages in {ctx.channel.mention}", discord.Color.purple())
 
 @bot.command(name="purge")
 @commands.has_permissions(manage_messages=True)
-async def purge(ctx, amount: int):
+async def purge_cmd(ctx, amount: int):
     await ctx.channel.purge(limit=amount + 1)
     await ctx.send(f"🧽 Purged {amount} messages.", delete_after=5)
-    await log_command(ctx, f"**Purged** {amount} messages in {ctx.channel.mention}", discord.Color.purple())
+    await log_command(ctx, f"Purged {amount} messages in {ctx.channel.mention}", discord.Color.purple())
 
-# Lock / Unlock channel
 @bot.command()
 @commands.has_permissions(manage_channels=True)
 async def lock(ctx):
@@ -271,7 +353,6 @@ async def unlock(ctx):
     await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=True)
     await ctx.send("🔓 Channel unlocked.")
 
-# Role Management
 @bot.command()
 @commands.has_permissions(manage_roles=True)
 async def addrole(ctx, member: discord.Member, role: discord.Role):
@@ -284,7 +365,9 @@ async def removerole(ctx, member: discord.Member, role: discord.Role):
     await member.remove_roles(role)
     await ctx.send(f"❌ Removed <@&{role.id}> from {member.mention}.")
 
-# Info Commands
+# =========================
+# Info commands
+# =========================
 @bot.command()
 async def userinfo(ctx, member: discord.Member = None):
     member = member or ctx.author
@@ -309,18 +392,18 @@ async def serverinfo(ctx):
     await ctx.send(embed=embed)
 
 # =========================
-# Help Command
+# Help command
 # =========================
 @bot.command()
 async def help(ctx):
     embed = discord.Embed(
         title="📖 Help Menu - GeoNet",
-        description="A feature-packed Discord bot by Rxs 💎",
+        description="Feature-packed Discord bot by Rxs 💎",
         color=discord.Color.blurple()
     )
     embed.add_field(
         name="🔨 Moderation",
-        value="`$ban @user [reason]`\n`$kick @user [reason]`\n`$warn @user [reason]`\n`$unwarn @user [reason]`\n`$warnings @user`\n`$rape @user`\n`$recover @user`\n`$cmd_permdemote @user`\n`$trial @user`",
+        value="`$ban @user [reason]`\n`$kick @user [reason]`\n`$mute @user [reason]`\n`$warn @user [reason]`\n`$unwarn <case_id>`\n`$warnings [@user]`\n`$rape @user`\n`$recover @user`\n`$cmd_permdemote @user`\n`$trial @user`",
         inline=False
     )
     embed.add_field(
@@ -332,7 +415,7 @@ async def help(ctx):
     await ctx.send(embed=embed)
 
 # =========================
-# Run Bot
+# Run
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
