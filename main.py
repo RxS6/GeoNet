@@ -189,7 +189,7 @@ async def recover(ctx, user: discord.Member):
 # =========================
 @bot.command(name='warn')
 @commands.has_permissions(manage_roles=True)
-async def warn(ctx, member: discord.Member, *, reason: str):
+async def warn(ctx, member: discord.Member, *, reason: str = "No reason provided"):
     await add_warning(member.id, ctx.guild.id, reason)
     embed = discord.Embed(title="⚠️ User Warned", color=discord.Color.gold(), timestamp=datetime.utcnow())
     embed.add_field(name="User", value=member.mention, inline=True)
@@ -198,25 +198,30 @@ async def warn(ctx, member: discord.Member, *, reason: str):
     await ctx.send(embed=embed)
     await log_command(ctx, f"**Warned** {member.mention} for: {reason}", discord.Color.orange())
 
+
 @bot.command(name='unwarn')
 @commands.has_permissions(manage_roles=True)
 async def unwarn(ctx, member: discord.Member, *, reason: str):
+    warnings = await check_warnings(member.id, ctx.guild.id)
+    if reason not in warnings:
+        await ctx.send(f"⚠️ No warning with that reason found for {member.mention}.")
+        return
     await remove_warning(member.id, ctx.guild.id, reason)
-    await ctx.send(f"✅ Warning removed for {member.mention}: {reason}")
+    await ctx.send(f"✅ Removed warning for {member.mention}: {reason}")
     await log_command(ctx, f"**Unwarned** {member.mention}. Reason: {reason}", discord.Color.green())
+
 
 @bot.command(name='warnings')
 @commands.has_permissions(manage_roles=True)
 async def warnings(ctx, member: discord.Member):
     warnings_list = await check_warnings(member.id, ctx.guild.id)
     if warnings_list:
-        embed = discord.Embed(title=f"Warnings for {member.name}", color=discord.Color.orange(), timestamp=datetime.utcnow())
+        embed = discord.Embed(title=f"⚠️ Warnings for {member}", color=discord.Color.orange(), timestamp=datetime.utcnow())
         for i, warning in enumerate(warnings_list, 1):
-            embed.add_field(name=f"Warning {i}", value=warning, inline=False)
+            embed.add_field(name=f"#{i}", value=warning, inline=False)
         await ctx.send(embed=embed)
     else:
-        await ctx.send(f"{member.mention} has no warnings.")
-
+        await ctx.send(f"✅ {member.mention} has no warnings.")
 # =========================
 # Moderation
 # =========================
@@ -336,3 +341,4 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
