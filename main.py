@@ -601,5 +601,3 @@ async def help(ctx):
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
 
-
-
