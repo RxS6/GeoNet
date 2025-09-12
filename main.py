@@ -1,8 +1,9 @@
 import os
+import sqlite3
 import aiosqlite
 import discord
 from discord.ext import commands
-from datetime import datetime
+from datetime import datetime, timezone
 from collections import defaultdict
 from keep_alive import keep_alive
 import asyncio
@@ -22,9 +23,30 @@ spam_tracker = defaultdict(list)  # anti-spam tracker
 DB_PATH = "roles.db"
 
 # =========================
-# DATABASE (cases table)
+# DATABASE (cases table) - safe init with integrity check
 # =========================
+def ensure_db_file():
+    # If file exists, run integrity check. If it fails, remove file.
+    if os.path.exists(DB_PATH):
+        try:
+            con = sqlite3.connect(DB_PATH)
+            cur = con.cursor()
+            cur.execute("PRAGMA integrity_check;")
+            res = cur.fetchone()
+            con.close()
+            if not res or res[0] != "ok":
+                print("⚠️ roles.db integrity check failed -> removing corrupt DB and recreating.")
+                os.remove(DB_PATH)
+        except sqlite3.DatabaseError:
+            print("⚠️ roles.db is not a valid sqlite DB -> removing and recreating.")
+            try:
+                os.remove(DB_PATH)
+            except Exception:
+                pass
+
 async def init_db():
+    # Ensure DB file is valid (or removed) before using aiosqlite
+    ensure_db_file()
     async with aiosqlite.connect(DB_PATH) as conn:
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS cases (
@@ -40,7 +62,7 @@ async def init_db():
         await conn.commit()
 
 async def add_case(guild_id: int, user_id: int, moderator_id: int, action: str, reason: str):
-    ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    ts = datetime.now(timezone.utc).isoformat()
     async with aiosqlite.connect(DB_PATH) as conn:
         await conn.execute(
             'INSERT INTO cases (guild_id, user_id, moderator_id, action, reason, timestamp) VALUES (?, ?, ?, ?, ?, ?)',
@@ -96,12 +118,13 @@ async def log_command(ctx, description: str, color: discord.Color = discord.Colo
                 title="⚡ Command Log",
                 description=description,
                 color=color,
-                timestamp=datetime.utcnow()
+                timestamp=datetime.now(timezone.utc)
             )
             embed.set_author(name=str(ctx.author), icon_url=ctx.author.display_avatar.url)
             embed.set_footer(text=f"Used in #{ctx.channel.name}", icon_url=ctx.guild.icon.url if ctx.guild.icon else None)
             await log_channel.send(embed=embed)
     except Exception:
+        # swallow logging errors (so bot commands don't crash)
         pass
 
 # =========================
@@ -109,10 +132,15 @@ async def log_command(ctx, description: str, color: discord.Color = discord.Colo
 # =========================
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='$', intents=intents)
-bot.remove_command("help")
+# remove default help to use custom one
+try:
+    bot.remove_command("help")
+except Exception:
+    pass
 
 @bot.event
 async def on_ready():
+    # ensure DB and tables exist (and recreate if needed)
     await init_db()
     print(f'✅ Logged in as {bot.user} ({bot.user.id})')
 
@@ -136,9 +164,10 @@ async def on_member_join(member):
 # =========================
 @bot.event
 async def on_message(message):
+    # keep message processing working with commands
     if message.author.bot:
         return
-    now = datetime.utcnow().timestamp()
+    now = datetime.now(timezone.utc).timestamp()
     last_times = spam_tracker[message.author.id]
     spam_tracker[message.author.id] = [t for t in last_times if now - t < 5]
     spam_tracker[message.author.id].append(now)
@@ -150,8 +179,15 @@ async def on_message(message):
                 await message.author.add_roles(mute_role)
             except Exception:
                 pass
-            await add_case(message.guild.id, message.author.id, bot.user.id, "Mute", "Auto-muted for spamming")
-            await message.channel.send(f"🤐 {message.author.mention} has been muted for spamming.")
+            # record auto-mute case
+            try:
+                await add_case(message.guild.id, message.author.id, bot.user.id, "Mute", "Auto-muted for spamming")
+            except Exception:
+                pass
+            try:
+                await message.channel.send(f"🤐 {message.author.mention} has been muted for spamming.")
+            except Exception:
+                pass
             try:
                 log_channel = message.guild.get_channel(log_channel_id)
                 if log_channel:
@@ -170,8 +206,11 @@ async def trial(ctx, member: discord.Member):
     role1 = ctx.guild.get_role(staff_role1_id)
     role2 = ctx.guild.get_role(staff_role2_id)
     if role1 and role2:
-        await member.add_roles(role1, role2)
-        await ctx.send(f"Assigned <@&{role1.id}> and <@&{role2.id}> to {member.mention}.")
+        try:
+            await member.add_roles(role1, role2)
+        except Exception:
+            pass
+        await ctx.send(f"✅ Assigned <@&{role1.id}> and <@&{role2.id}> to {member.mention}.")
         await log_command(ctx, f"Assigned trial roles to {member.mention}.", discord.Color.blue())
     else:
         await ctx.send("⚠️ Required trial roles not found.")
@@ -189,9 +228,12 @@ async def cmd_permdemote(ctx, member: discord.Member):
     ]
     roles_to_remove = [ctx.guild.get_role(rid) for rid in role_ids_to_remove if ctx.guild.get_role(rid) in member.roles]
     if roles_to_remove:
-        await member.remove_roles(*roles_to_remove)
+        try:
+            await member.remove_roles(*roles_to_remove)
+        except Exception:
+            pass
         mentions = " ".join([f"<@&{r.id}>" for r in roles_to_remove])
-        await ctx.send(f"Removed {mentions} from {member.mention}.")
+        await ctx.send(f"✅ Removed {mentions} from {member.mention}.")
         await log_command(ctx, f"Permdemoted {member.mention}. Roles removed: {mentions}", discord.Color.red())
     else:
         await ctx.send(f"{member.mention} has none of the target roles.")
@@ -229,10 +271,16 @@ async def recover(ctx, user: discord.Member):
 @bot.command(name='warn')
 @commands.has_permissions(manage_roles=True)
 async def warn(ctx, member: discord.Member, *, reason: str = "No reason provided"):
-    case_id = await add_case(ctx.guild.id, member.id, ctx.author.id, "Warn", reason)
+    try:
+        case_id = await add_case(ctx.guild.id, member.id, ctx.author.id, "Warn", reason)
+    except Exception as e:
+        await ctx.send("⚠️ Unable to save case to database. Check bot logs.")
+        print("add_case error:", e)
+        return
+
     counts = await get_case_counts(ctx.guild.id, member.id)
-    embed = discord.Embed(color=discord.Color.gold(), timestamp=datetime.utcnow())
-    embed.description = f"<:check:773218860840648725> `Case #{case_id}` {member.mention} has been **warned**.\n\n**Reason:** {reason}"
+    embed = discord.Embed(color=discord.Color.gold(), timestamp=datetime.now(timezone.utc))
+    embed.description = f"<:check:773218860840648725> `Case #{case_id}` {member.mention} has been **warned**.\n\n**Reason:** *{reason}*"
     embed.set_footer(text=f"Warned: {counts['Warn']} | Muted: {counts['Mute']} | Kicked: {counts['Kick']} | Banned: {counts['Ban']}")
     await ctx.send(embed=embed)
     await log_command(ctx, f"Warned {member} | Case #{case_id} | Reason: {reason}", discord.Color.orange())
@@ -241,22 +289,39 @@ async def warn(ctx, member: discord.Member, *, reason: str = "No reason provided
 @commands.has_permissions(manage_roles=True)
 async def warnings_cmd(ctx, member: discord.Member = None):
     member = member or ctx.author
-    cases = await get_user_cases(ctx.guild.id, member.id)
+    try:
+        cases = await get_user_cases(ctx.guild.id, member.id)
+    except Exception as e:
+        await ctx.send("⚠️ Unable to read cases from database.")
+        print("get_user_cases error:", e)
+        return
+
     if not cases:
         return await ctx.send(f"✅ {member.mention} has no cases.")
     counts = await get_case_counts(ctx.guild.id, member.id)
-    embed = discord.Embed(title=f"📋 Cases for {member}", color=discord.Color.orange(), timestamp=datetime.utcnow())
+    embed = discord.Embed(title=f"📋 Cases for {member}", color=discord.Color.orange(), timestamp=datetime.now(timezone.utc))
     for cid, mod_id, action, reason, ts in cases:
         moderator = ctx.guild.get_member(mod_id)
         mod_name = str(moderator) if moderator else f"<@{mod_id}>"
-        embed.add_field(name=f"Case #{cid} — {action}", value=f"**Moderator:** {mod_name}\n**Reason:** {reason}\n**At:** {ts}", inline=False)
+        # format timestamp
+        try:
+            ts_display = datetime.fromisoformat(ts).astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        except Exception:
+            ts_display = str(ts)
+        embed.add_field(name=f"Case #{cid} — {action}", value=f"**Moderator:** {mod_name}\n**Reason:** {reason}\n**At:** {ts_display}", inline=False)
     embed.set_footer(text=f"Warned: {counts['Warn']} | Muted: {counts['Mute']} | Kicked: {counts['Kick']} | Banned: {counts['Ban']}")
     await ctx.send(embed=embed)
 
 @bot.command(name='unwarn')
 @commands.has_permissions(manage_roles=True)
 async def unwarn_cmd(ctx, case_id: int):
-    case = await get_case_by_id(ctx.guild.id, case_id)
+    try:
+        case = await get_case_by_id(ctx.guild.id, case_id)
+    except Exception as e:
+        await ctx.send("⚠️ Unable to read cases from database.")
+        print("get_case_by_id error:", e)
+        return
+
     if not case:
         return await ctx.send("⚠️ Case not found.")
     cid, guild_id, user_id, mod_id, action, reason, ts = case
@@ -264,13 +329,13 @@ async def unwarn_cmd(ctx, case_id: int):
         return await ctx.send("⚠️ That case is not a warn-type case.")
     member = ctx.guild.get_member(user_id)
 
-    embed = discord.Embed(title="⚠️ Confirm Unwarn", color=discord.Color.red(), timestamp=datetime.utcnow())
+    embed = discord.Embed(title="⚠️ Confirm Unwarn", color=discord.Color.red(), timestamp=datetime.now(timezone.utc))
     embed.add_field(name="Member", value=f"{member if member else f'<@{user_id}>'}", inline=False)
     embed.add_field(name="Action", value="Warn", inline=True)
     embed.add_field(name="Reason", value=reason, inline=False)
     embed.set_footer(text="Reply with yes/no within 30s")
 
-    await ctx.send(embed=embed)
+    prompt = await ctx.send(embed=embed)
 
     def check(m):
         return m.author == ctx.author and m.channel == ctx.channel and m.content.lower() in ("yes", "no")
@@ -281,11 +346,67 @@ async def unwarn_cmd(ctx, case_id: int):
         return await ctx.send("⏳ Confirmation timed out. Action cancelled.")
 
     if reply.content.lower() == "yes":
-        await remove_case(case_id)
+        try:
+            await remove_case(case_id)
+        except Exception as e:
+            await ctx.send("⚠️ Unable to remove case from database.")
+            print("remove_case error:", e)
+            return
         await ctx.send(f"<:check:773218860840648725> Case #{case_id} for **{member if member else f'<@{user_id}>'}** has been removed.")
         await log_command(ctx, f"Removed case #{case_id} for user {user_id}", discord.Color.green())
     else:
         await ctx.send("❌ Action cancelled.")
+
+# Manual mute tracked as case
+@bot.command(name='mute')
+@commands.has_permissions(manage_roles=True)
+async def mute_cmd(ctx, member: discord.Member, *, reason: str = "No reason provided"):
+    mute_role = discord.utils.get(ctx.guild.roles, name="Muted")
+    if not mute_role:
+        return await ctx.send("⚠️ No 'Muted' role found on this server.")
+    try:
+        await member.add_roles(mute_role)
+    except Exception:
+        pass
+    try:
+        case_id = await add_case(ctx.guild.id, member.id, ctx.author.id, "Mute", reason)
+    except Exception:
+        await ctx.send("⚠️ Unable to save case to database.")
+        return
+    counts = await get_case_counts(ctx.guild.id, member.id)
+    await ctx.send(f"🤐 Muted {member.mention} | Case #{case_id} | Reason: {reason}\nWarned: {counts['Warn']} | Muted: {counts['Mute']} | Kicked: {counts['Kick']} | Banned: {counts['Ban']}")
+    await log_command(ctx, f"Muted {member} | Case #{case_id} | Reason: {reason}", discord.Color.orange())
+
+# Kick / Ban (tracked)
+@bot.command(name='kick')
+@commands.has_permissions(kick_members=True)
+async def kick_cmd(ctx, member: discord.Member, *, reason: str = "No reason provided"):
+    try:
+        await member.kick(reason=reason)
+    except Exception:
+        pass
+    try:
+        case_id = await add_case(ctx.guild.id, member.id, ctx.author.id, "Kick", reason)
+    except Exception:
+        await ctx.send("⚠️ Unable to save case to database.")
+        return
+    await ctx.send(f"👢 Kicked {member.mention} | Case #{case_id} | Reason: {reason}")
+    await log_command(ctx, f"Kicked {member} | Case #{case_id} | Reason: {reason}", discord.Color.red())
+
+@bot.command(name='ban')
+@commands.has_permissions(ban_members=True)
+async def ban_cmd(ctx, member: discord.Member, *, reason: str = "No reason provided"):
+    try:
+        await member.ban(reason=reason)
+    except Exception:
+        pass
+    try:
+        case_id = await add_case(ctx.guild.id, member.id, ctx.author.id, "Ban", reason)
+    except Exception:
+        await ctx.send("⚠️ Unable to save case to database.")
+        return
+    await ctx.send(f"🔨 Banned {member.mention} | Case #{case_id} | Reason: {reason}")
+    await log_command(ctx, f"Banned {member} | Case #{case_id} | Reason: {reason}", discord.Color.red())
 
 # =========================
 # Utility commands
