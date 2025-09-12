@@ -530,7 +530,6 @@ async def remindme(ctx, time: str, *, reminder: str):
 # Help
 # =========================
 @bot.command()
-@bot.command()
 async def help(ctx):
     categories = {
         "Moderation": [
@@ -593,11 +592,12 @@ async def help(ctx):
             await interaction.message.delete()
 
     view = HelpView()
-    await ctx.send(embed=pages[0], view=view))
+    await ctx.send(embed=pages[0], view=view)
 
 # =========================
 # Run
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
