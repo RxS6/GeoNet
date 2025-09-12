@@ -280,8 +280,7 @@ async def warn(ctx, member: discord.Member, *, reason: str = "No reason provided
 
     counts = await get_case_counts(ctx.guild.id, member.id)
     embed = discord.Embed(color=discord.Color.gold(), timestamp=datetime.now(timezone.utc))
-    embed.description = f"<:check:773218860840648725> `Case #{case_id}` {member.mention} has been **warned**.\n\n**Reason:** *{reason}*"
-    embed.set_footer(text=f"Warned: {counts['Warn']} | Muted: {counts['Mute']} | Kicked: {counts['Kick']} | Banned: {counts['Ban']}")
+    embed.description = f"✅ `Case #{case_id}` {member.mention} has been **warned**.\n\n**Reason:** *{reason}*"
     await ctx.send(embed=embed)
     await log_command(ctx, f"Warned {member} | Case #{case_id} | Reason: {reason}", discord.Color.orange())
 
@@ -352,7 +351,7 @@ async def unwarn_cmd(ctx, case_id: int):
             await ctx.send("⚠️ Unable to remove case from database.")
             print("remove_case error:", e)
             return
-        await ctx.send(f"<:check:773218860840648725> Case #{case_id} for **{member if member else f'<@{user_id}>'}** has been removed.")
+        await ctx.send(f"✅ Case #{case_id} for **{member if member else f'<@{user_id}>'}** has been removed.")
         await log_command(ctx, f"Removed case #{case_id} for user {user_id}", discord.Color.green())
     else:
         await ctx.send("❌ Action cancelled.")
@@ -503,3 +502,4 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
