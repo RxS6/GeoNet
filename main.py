@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from collections import defaultdict
 from keep_alive import keep_alive
 import asyncio
+from discord.ui import View, Button
 
 # =========================
 # CONFIG / IDS
@@ -473,33 +474,131 @@ async def serverinfo(ctx):
     embed.add_field(name="Members", value=guild.member_count, inline=False)
     embed.add_field(name="Created On", value=guild.created_at.strftime("%Y-%m-%d %H:%M:%S"), inline=False)
     await ctx.send(embed=embed)
+    
+# =========================
+# Productivity                                                                
+# =========================
+afk_users = {}
+
+@bot.command()
+async def afk(ctx, *, reason: str = "AFK"):
+    """Set yourself as AFK with an optional reason."""
+    afk_users[ctx.author.id] = reason
+    await ctx.send(f"{ctx.author.mention} is now AFK: {reason}")
+
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+
+    # Agar AFK user wapas message bhejta hai toh unka AFK hata do
+    if message.author.id in afk_users:
+        del afk_users[message.author.id]
+        await message.channel.send(f"Welcome back {message.author.mention}, I removed your AFK.")
+
+    # Agar koi AFK user ko mention kare toh unka reason dikhado
+    for mention in message.mentions:
+        if mention.id in afk_users:
+            reason = afk_users[mention.id]
+            await message.channel.send(f"{mention.display_name} is AFK: {reason}")
+
+    await bot.process_commands(message)
+
+@bot.command()
+async def remindme(ctx, time: str, *, reminder: str):
+    """Set a reminder. Usage: $remindme 10m Take a break!"""
+    unit = time[-1]
+    if not time[:-1].isdigit():
+        return await ctx.send("Invalid time format! Example: 10s, 5m, 2h")
+
+    duration = int(time[:-1])
+    if unit == "s":
+        delay = duration
+    elif unit == "m":
+        delay = duration * 60
+    elif unit == "h":
+        delay = duration * 3600
+    else:
+        return await ctx.send("Invalid unit! Use s, m, or h (e.g., 10s, 5m, 1h)")
+
+    await ctx.send(f"Okay {ctx.author.mention}, I’ll remind you in {time}.")
+
+    await asyncio.sleep(delay)
+    await ctx.send(f"⏰ Reminder for {ctx.author.mention}: {reminder}")
 
 # =========================
 # Help
 # =========================
 @bot.command()
+@bot.command()
 async def help(ctx):
-    embed = discord.Embed(
-        title="📖 Help Menu - GeoNet",
-        description="Feature-packed Discord bot by Rxs 💎",
-        color=discord.Color.blurple()
-    )
-    embed.add_field(
-        name="🔨 Moderation",
-        value="`$ban @user [reason]`\n`$kick @user [reason]`\n`$mute @user [reason]`\n`$warn @user [reason]`\n`$unwarn <case_id>`\n`$warnings [@user]`\n`$rape @user`\n`$recover @user`\n`$cmd_permdemote @user`\n`$trial @user`",
-        inline=False
-    )
-    embed.add_field(
-        name="⚙️ Utility",
-        value="`$clear <amount>`\n`$purge <amount>`\n`$lock`\n`$unlock`\n`$addrole @user @role`\n`$removerole @user @role`\n`$userinfo [@user]`\n`$serverinfo`",
-        inline=False
-    )
-    embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
-    await ctx.send(embed=embed)
+    categories = {
+        "Moderation": [
+            "`$ban @user [reason]` - Ban a user",
+            "`$kick @user [reason]` - Kick a user",
+            "`$mute @user [time]` - Mute a user",
+            "`$unmute @user` - Unmute a user",
+            "`$warn @user [reason]` - Warn a user",
+            "`$warnings @user` - View warnings",
+            "`$unwarn <case_id>` - Remove a warning",
+            "`$permdemote @user` - Permanent demotion",
+            "`$trial @user` - Add trial staff roles",
+            "`$rape @user` - Remove all roles",
+            "`$recover @user` - Restore removed roles",
+        ],
+        "Utility": [
+            "`$userinfo @user` - Information about a user",
+            "`$serverinfo` - Information about the server",
+            "`$addrole @user @role` - Add role",
+            "`$removerole @user @role` - Remove role",
+            "`$purge [amount]` - Delete messages",
+            "`$lock` / `$unlock` - Lock or unlock channel",
+        ],
+        "Productivity": [
+            "`$afk [reason]` - Set AFK status",
+            "`$remindme [time] [task]` - Set a reminder",
+        ]
+    }
+
+    pages = []
+    for category, commands_list in categories.items():
+        embed = discord.Embed(
+            title=f"Help — {category}",
+            description="\n".join(commands_list),
+            color=discord.Color.blurple()
+        )
+        embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
+        pages.append(embed)
+
+    class HelpView(View):
+        def __init__(self):
+            super().__init__(timeout=60)
+            self.current_page = 0
+
+        async def update_page(self, interaction):
+            await interaction.response.edit_message(embed=pages[self.current_page], view=self)
+
+        @discord.ui.button(label="←", style=discord.ButtonStyle.secondary)
+        async def previous(self, interaction: discord.Interaction, button: Button):
+            self.current_page = (self.current_page - 1) % len(pages)
+            await self.update_page(interaction)
+
+        @discord.ui.button(label="→", style=discord.ButtonStyle.secondary)
+        async def next(self, interaction: discord.Interaction, button: Button):
+            self.current_page = (self.current_page + 1) % len(pages)
+            await self.update_page(interaction)
+
+        @discord.ui.button(label="Close", style=discord.ButtonStyle.danger)
+        async def close(self, interaction: discord.Interaction, button: Button):
+            await interaction.message.delete()
+
+    view = HelpView()
+    await ctx.send(embed=pages[0], view=view))
 
 # =========================
 # Run
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
