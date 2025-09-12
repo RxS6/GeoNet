@@ -102,7 +102,6 @@ async def log_command(ctx, description: str, color: discord.Color = discord.Colo
             embed.set_footer(text=f"Used in #{ctx.channel.name}", icon_url=ctx.guild.icon.url if ctx.guild.icon else None)
             await log_channel.send(embed=embed)
     except Exception:
-        # avoid crashing if logging fails
         pass
 
 # =========================
@@ -141,7 +140,6 @@ async def on_message(message):
         return
     now = datetime.utcnow().timestamp()
     last_times = spam_tracker[message.author.id]
-    # keep only last 5 seconds
     spam_tracker[message.author.id] = [t for t in last_times if now - t < 5]
     spam_tracker[message.author.id].append(now)
 
@@ -201,7 +199,7 @@ async def cmd_permdemote(ctx, member: discord.Member):
 @bot.command()
 @commands.has_permissions(manage_roles=True)
 async def rape(ctx, user: discord.Member):
-    roles = user.roles[1:]  # exclude @everyone
+    roles = user.roles[1:]
     if not roles:
         await ctx.send(f"{user.mention} has no roles to remove!")
         return
@@ -226,7 +224,7 @@ async def recover(ctx, user: discord.Member):
     await ctx.send(f"✅ Recovered all roles for {user.mention}.")
 
 # =========================
-# CASE-BASED moderation (warn / unwarn / warnings / mute / kick / ban)
+# CASE-BASED moderation
 # =========================
 @bot.command(name='warn')
 @commands.has_permissions(manage_roles=True)
@@ -234,7 +232,8 @@ async def warn(ctx, member: discord.Member, *, reason: str = "No reason provided
     case_id = await add_case(ctx.guild.id, member.id, ctx.author.id, "Warn", reason)
     counts = await get_case_counts(ctx.guild.id, member.id)
     embed = discord.Embed(color=discord.Color.gold(), timestamp=datetime.utcnow())
-    embed.description = f"<:check:773218860840648725> `Case #{case_id}` {member.mention} has been warned.\n\n**Reason:** {reason}\n\nWarned: {counts['Warn']} | Muted: {counts['Mute']} | Kicked: {counts['Kick']} | Banned: {counts['Ban']}"
+    embed.description = f"<:check:773218860840648725> `Case #{case_id}` {member.mention} has been **warned**.\n\n**Reason:** {reason}"
+    embed.set_footer(text=f"Warned: {counts['Warn']} | Muted: {counts['Mute']} | Kicked: {counts['Kick']} | Banned: {counts['Ban']}")
     await ctx.send(embed=embed)
     await log_command(ctx, f"Warned {member} | Case #{case_id} | Reason: {reason}", discord.Color.orange())
 
@@ -264,11 +263,14 @@ async def unwarn_cmd(ctx, case_id: int):
     if action != "Warn":
         return await ctx.send("⚠️ That case is not a warn-type case.")
     member = ctx.guild.get_member(user_id)
-    # Confirm
-    prompt = await ctx.send(
-        f"<@{ctx.author.id}>, are you sure you want to remove this punishment? (yes/no)\n"
-        f"**Member:** {member if member else f'<@{user_id}>'}\n**Action:** Warn\n**Reason:** {reason}"
-    )
+
+    embed = discord.Embed(title="⚠️ Confirm Unwarn", color=discord.Color.red(), timestamp=datetime.utcnow())
+    embed.add_field(name="Member", value=f"{member if member else f'<@{user_id}>'}", inline=False)
+    embed.add_field(name="Action", value="Warn", inline=True)
+    embed.add_field(name="Reason", value=reason, inline=False)
+    embed.set_footer(text="Reply with yes/no within 30s")
+
+    await ctx.send(embed=embed)
 
     def check(m):
         return m.author == ctx.author and m.channel == ctx.channel and m.content.lower() in ("yes", "no")
@@ -285,47 +287,8 @@ async def unwarn_cmd(ctx, case_id: int):
     else:
         await ctx.send("❌ Action cancelled.")
 
-# Mute (manual)
-@bot.command(name='mute')
-@commands.has_permissions(manage_roles=True)
-async def mute_cmd(ctx, member: discord.Member, *, reason: str = "No reason provided"):
-    mute_role = discord.utils.get(ctx.guild.roles, name="Muted")
-    if not mute_role:
-        return await ctx.send("⚠️ No 'Muted' role found on this server.")
-    try:
-        await member.add_roles(mute_role)
-    except Exception:
-        pass
-    case_id = await add_case(ctx.guild.id, member.id, ctx.author.id, "Mute", reason)
-    counts = await get_case_counts(ctx.guild.id, member.id)
-    await ctx.send(f"🤐 Muted {member.mention} | Case #{case_id} | Reason: {reason}\nWarned: {counts['Warn']} | Muted: {counts['Mute']} | Kicked: {counts['Kick']} | Banned: {counts['Ban']}")
-    await log_command(ctx, f"Muted {member} | Case #{case_id} | Reason: {reason}", discord.Color.orange())
-
-# Kick / Ban (tracked)
-@bot.command(name='kick')
-@commands.has_permissions(kick_members=True)
-async def kick_cmd(ctx, member: discord.Member, *, reason: str = "No reason provided"):
-    try:
-        await member.kick(reason=reason)
-    except Exception:
-        pass
-    case_id = await add_case(ctx.guild.id, member.id, ctx.author.id, "Kick", reason)
-    await ctx.send(f"👢 Kicked {member.mention} | Case #{case_id} | Reason: {reason}")
-    await log_command(ctx, f"Kicked {member} | Case #{case_id} | Reason: {reason}", discord.Color.red())
-
-@bot.command(name='ban')
-@commands.has_permissions(ban_members=True)
-async def ban_cmd(ctx, member: discord.Member, *, reason: str = "No reason provided"):
-    try:
-        await member.ban(reason=reason)
-    except Exception:
-        pass
-    case_id = await add_case(ctx.guild.id, member.id, ctx.author.id, "Ban", reason)
-    await ctx.send(f"🔨 Banned {member.mention} | Case #{case_id} | Reason: {reason}")
-    await log_command(ctx, f"Banned {member} | Case #{case_id} | Reason: {reason}", discord.Color.red())
-
 # =========================
-# Utility: clear / purge / lock / unlock / role management
+# Utility commands
 # =========================
 @bot.command(name="clear")
 @commands.has_permissions(manage_messages=True)
@@ -392,7 +355,7 @@ async def serverinfo(ctx):
     await ctx.send(embed=embed)
 
 # =========================
-# Help command
+# Help
 # =========================
 @bot.command()
 async def help(ctx):
