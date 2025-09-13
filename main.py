@@ -107,6 +107,24 @@ async def get_case_counts(guild_id: int, user_id: int):
                 if action in counts:
                     counts[action] = cnt
             return counts
+            
+# =========================
+# BOT setup
+# =========================
+intents = discord.Intents.all()
+bot = commands.Bot(command_prefix='$', intents=intents)
+# remove default help to use custom one
+try:
+    bot.remove_command("help")
+except Exception:
+    pass
+
+@bot.event
+async def on_ready():
+    # ensure DB and tables exist (and recreate if needed)
+    await init_db()
+    print(f'✅ Logged in as {bot.user} ({bot.user.id})')
+
 
 # =========================
 # LOGGING SYSTEM (Sapphire-style)
@@ -202,23 +220,6 @@ async def on_member_unban(guild, user):
     )
     await send_log(guild, embed)
     
-# =========================
-# BOT setup
-# =========================
-intents = discord.Intents.all()
-bot = commands.Bot(command_prefix='$', intents=intents)
-# remove default help to use custom one
-try:
-    bot.remove_command("help")
-except Exception:
-    pass
-
-@bot.event
-async def on_ready():
-    # ensure DB and tables exist (and recreate if needed)
-    await init_db()
-    print(f'✅ Logged in as {bot.user} ({bot.user.id})')
-
 # =========================
 # Autorole
 # =========================
@@ -737,6 +738,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
