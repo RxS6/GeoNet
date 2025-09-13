@@ -109,25 +109,99 @@ async def get_case_counts(guild_id: int, user_id: int):
             return counts
 
 # =========================
-# LOGGING helper
+# LOGGING SYSTEM (Sapphire-style)
 # =========================
-async def log_command(ctx, description: str, color: discord.Color = discord.Color.blurple()):
+async def send_log(guild, embed: discord.Embed):
     try:
-        log_channel = ctx.guild.get_channel(log_channel_id)
+        log_channel = guild.get_channel(log_channel_id)
         if log_channel:
-            embed = discord.Embed(
-                title="⚡ Command Log",
-                description=description,
-                color=color,
-                timestamp=datetime.now(timezone.utc)
-            )
-            embed.set_author(name=str(ctx.author), icon_url=ctx.author.display_avatar.url)
-            embed.set_footer(text=f"Used in #{ctx.channel.name}", icon_url=ctx.guild.icon.url if ctx.guild.icon else None)
             await log_channel.send(embed=embed)
-    except Exception:
-        # swallow logging errors (so bot commands don't crash)
+    except:
         pass
 
+async def log_command(ctx, description: str, color: discord.Color = discord.Color.blurple()):
+    embed = discord.Embed(
+        title="⚡ Command Used",
+        description=description,
+        color=color,
+        timestamp=datetime.now(timezone.utc)
+    )
+    embed.set_author(name=str(ctx.author), icon_url=ctx.author.display_avatar.url)
+    embed.set_footer(text=f"Used in #{ctx.channel.name}", icon_url=ctx.guild.icon.url if ctx.guild.icon else None)
+    await send_log(ctx.guild, embed)
+
+# =========================
+# Event-based Logs
+# =========================
+@bot.event
+async def on_message_delete(message):
+    if message.author.bot: return
+    embed = discord.Embed(
+        title="🗑 Message Deleted",
+        color=discord.Color.red(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    embed.add_field(name="User", value=message.author.mention, inline=False)
+    embed.add_field(name="Channel", value=message.channel.mention, inline=False)
+    embed.add_field(name="Content", value=message.content or "*Empty*", inline=False)
+    await send_log(message.guild, embed)
+
+@bot.event
+async def on_message_edit(before, after):
+    if before.author.bot: return
+    if before.content == after.content: return
+    embed = discord.Embed(
+        title="✏ Message Edited",
+        color=discord.Color.orange(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    embed.add_field(name="User", value=before.author.mention, inline=False)
+    embed.add_field(name="Channel", value=before.channel.mention, inline=False)
+    embed.add_field(name="Before", value=before.content or "*Empty*", inline=False)
+    embed.add_field(name="After", value=after.content or "*Empty*", inline=False)
+    await send_log(before.guild, embed)
+
+@bot.event
+async def on_member_join(member):
+    embed = discord.Embed(
+        title="👋 Member Joined",
+        description=f"{member.mention} joined the server!",
+        color=discord.Color.green(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    embed.set_thumbnail(url=member.display_avatar.url)
+    await send_log(member.guild, embed)
+
+@bot.event
+async def on_member_remove(member):
+    embed = discord.Embed(
+        title="🚪 Member Left",
+        description=f"{member} has left the server.",
+        color=discord.Color.red(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    await send_log(member.guild, embed)
+
+@bot.event
+async def on_member_ban(guild, user):
+    embed = discord.Embed(
+        title="🔨 Member Banned",
+        description=f"{user} was banned from the server.",
+        color=discord.Color.dark_red(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    await send_log(guild, embed)
+
+@bot.event
+async def on_member_unban(guild, user):
+    embed = discord.Embed(
+        title="♻ Member Unbanned",
+        description=f"{user} was unbanned.",
+        color=discord.Color.green(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    await send_log(guild, embed)
+    
 # =========================
 # BOT setup
 # =========================
@@ -156,48 +230,112 @@ async def on_member_join(member):
             await member.add_roles(role)
         except Exception:
             pass
-        channel = member.guild.system_channel
-        if channel:
-            await channel.send(f"👋 Welcome {member.mention}, you’ve been given <@&{role.id}>!")
 
+        general_channel = member.guild.get_channel(1410667416903483522)  # General ka ID daal yaha
+        if general_channel:
+            await general_channel.send(
+                f"👋 Welcome {member.mention}, you’ve been given <@&{role.id}>!"
+            )
+            
 # =========================
-# Anti-spam (very simple)
+# AutoMod (Wick-style)
 # =========================
+spam_tracker = defaultdict(list)
+mention_tracker = defaultdict(list)
+
 @bot.event
 async def on_message(message):
-    # keep message processing working with commands
     if message.author.bot:
         return
+
     now = datetime.now(timezone.utc).timestamp()
+
+    # =========================
+    # Anti-Spam
+    # =========================
     last_times = spam_tracker[message.author.id]
     spam_tracker[message.author.id] = [t for t in last_times if now - t < 5]
     spam_tracker[message.author.id].append(now)
 
-    if len(spam_tracker[message.author.id]) >= 5:
+    if len(spam_tracker[message.author.id]) >= 5:  # 5 msgs in 5 sec
         mute_role = discord.utils.get(message.guild.roles, name="Muted")
         if mute_role:
             try:
-                await message.author.add_roles(mute_role)
-            except Exception:
+                await message.author.add_roles(mute_role, reason="Auto-muted for spamming")
+                await message.channel.send(f"🤐 {message.author.mention} muted for spamming.")
+            except:
                 pass
-            # record auto-mute case
-            try:
-                await add_case(message.guild.id, message.author.id, bot.user.id, "Mute", "Auto-muted for spamming")
-            except Exception:
-                pass
-            try:
-                await message.channel.send(f"🤐 {message.author.mention} has been muted for spamming.")
-            except Exception:
-                pass
-            try:
-                log_channel = message.guild.get_channel(log_channel_id)
-                if log_channel:
-                    await log_channel.send(f"🚨 Auto-muted {message.author.mention} for spamming.")
-            except Exception:
-                pass
-        spam_tracker[message.author.id] = []
-    await bot.process_commands(message)
 
+            embed = discord.Embed(
+                title="🚨 AutoMod: Spam Detected",
+                color=discord.Color.red(),
+                timestamp=datetime.now(timezone.utc)
+            )
+            embed.set_author(name=str(message.author), icon_url=message.author.display_avatar.url)
+            embed.add_field(name="User", value=message.author.mention, inline=False)
+            embed.add_field(name="Action", value="Muted", inline=True)
+            embed.add_field(name="Reason", value="Spamming messages", inline=True)
+            embed.add_field(name="Channel", value=message.channel.mention, inline=False)
+            embed.set_footer(text=f"User ID: {message.author.id}")
+
+            await send_log(message.guild, embed)
+        spam_tracker[message.author.id] = []
+
+    # =========================
+    # Anti-Link (Discord Invites)
+    # =========================
+    if "discord.gg/" in message.content or "discord.com/invite/" in message.content:
+        try:
+            await message.delete()
+        except:
+            pass
+
+        embed = discord.Embed(
+            title="🔗 AutoMod: Invite Link Blocked",
+            color=discord.Color.orange(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        embed.set_author(name=str(message.author), icon_url=message.author.display_avatar.url)
+        embed.add_field(name="User", value=message.author.mention, inline=False)
+        embed.add_field(name="Action", value="Message Deleted", inline=True)
+        embed.add_field(name="Reason", value="Posted Invite Link", inline=True)
+        embed.add_field(name="Channel", value=message.channel.mention, inline=False)
+        embed.set_footer(text=f"User ID: {message.author.id}")
+
+        await send_log(message.guild, embed)
+
+    # =========================
+    # Anti-Mass Mentions
+    # =========================
+    if len(message.mentions) >= 5:
+        try:
+            await message.delete()
+        except:
+            pass
+
+        mute_role = discord.utils.get(message.guild.roles, name="Muted")
+        if mute_role:
+            try:
+                await message.author.add_roles(mute_role, reason="Mass mentions")
+            except:
+                pass
+
+        embed = discord.Embed(
+            title="🚨 AutoMod: Mass Mentions",
+            color=discord.Color.dark_red(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        embed.set_author(name=str(message.author), icon_url=message.author.display_avatar.url)
+        embed.add_field(name="User", value=message.author.mention, inline=False)
+        embed.add_field(name="Action", value="Muted", inline=True)
+        embed.add_field(name="Reason", value=f"Tagged {len(message.mentions)} users", inline=True)
+        embed.add_field(name="Channel", value=message.channel.mention, inline=False)
+        embed.set_footer(text=f"User ID: {message.author.id}")
+
+        await send_log(message.guild, embed)
+
+    await bot.process_commands(message)
+    
 # =========================
 # STAFF / FUN commands (trial, permdemote, rape/recover)
 # =========================
@@ -599,5 +737,6 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
