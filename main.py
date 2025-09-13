@@ -126,99 +126,6 @@ async def on_ready():
     print(f'✅ Logged in as {bot.user} ({bot.user.id})')
 
 
-# =========================
-# LOGGING SYSTEM (Sapphire-style)
-# =========================
-async def send_log(guild, embed: discord.Embed):
-    try:
-        log_channel = guild.get_channel(log_channel_id)
-        if log_channel:
-            await log_channel.send(embed=embed)
-    except:
-        pass
-
-async def log_command(ctx, description: str, color: discord.Color = discord.Color.blurple()):
-    embed = discord.Embed(
-        title="⚡ Command Used",
-        description=description,
-        color=color,
-        timestamp=datetime.now(timezone.utc)
-    )
-    embed.set_author(name=str(ctx.author), icon_url=ctx.author.display_avatar.url)
-    embed.set_footer(text=f"Used in #{ctx.channel.name}", icon_url=ctx.guild.icon.url if ctx.guild.icon else None)
-    await send_log(ctx.guild, embed)
-
-# =========================
-# Event-based Logs
-# =========================
-@bot.event
-async def on_message_delete(message):
-    if message.author.bot: return
-    embed = discord.Embed(
-        title="🗑 Message Deleted",
-        color=discord.Color.red(),
-        timestamp=datetime.now(timezone.utc)
-    )
-    embed.add_field(name="User", value=message.author.mention, inline=False)
-    embed.add_field(name="Channel", value=message.channel.mention, inline=False)
-    embed.add_field(name="Content", value=message.content or "*Empty*", inline=False)
-    await send_log(message.guild, embed)
-
-@bot.event
-async def on_message_edit(before, after):
-    if before.author.bot: return
-    if before.content == after.content: return
-    embed = discord.Embed(
-        title="✏ Message Edited",
-        color=discord.Color.orange(),
-        timestamp=datetime.now(timezone.utc)
-    )
-    embed.add_field(name="User", value=before.author.mention, inline=False)
-    embed.add_field(name="Channel", value=before.channel.mention, inline=False)
-    embed.add_field(name="Before", value=before.content or "*Empty*", inline=False)
-    embed.add_field(name="After", value=after.content or "*Empty*", inline=False)
-    await send_log(before.guild, embed)
-
-@bot.event
-async def on_member_join(member):
-    embed = discord.Embed(
-        title="👋 Member Joined",
-        description=f"{member.mention} joined the server!",
-        color=discord.Color.green(),
-        timestamp=datetime.now(timezone.utc)
-    )
-    embed.set_thumbnail(url=member.display_avatar.url)
-    await send_log(member.guild, embed)
-
-@bot.event
-async def on_member_remove(member):
-    embed = discord.Embed(
-        title="🚪 Member Left",
-        description=f"{member} has left the server.",
-        color=discord.Color.red(),
-        timestamp=datetime.now(timezone.utc)
-    )
-    await send_log(member.guild, embed)
-
-@bot.event
-async def on_member_ban(guild, user):
-    embed = discord.Embed(
-        title="🔨 Member Banned",
-        description=f"{user} was banned from the server.",
-        color=discord.Color.dark_red(),
-        timestamp=datetime.now(timezone.utc)
-    )
-    await send_log(guild, embed)
-
-@bot.event
-async def on_member_unban(guild, user):
-    embed = discord.Embed(
-        title="♻ Member Unbanned",
-        description=f"{user} was unbanned.",
-        color=discord.Color.green(),
-        timestamp=datetime.now(timezone.utc)
-    )
-    await send_log(guild, embed)
     
 # =========================
 # Autorole
@@ -237,7 +144,248 @@ async def on_member_join(member):
             await general_channel.send(
                 f"👋 Welcome {member.mention}, you’ve been given <@&{role.id}>!"
             )
-            
+            # =========================
+
+# EXTENDED LOGGING SYSTEM (All Activities except Guild Events)
+# =========================
+async def send_log(guild, embed: discord.Embed):
+    try:
+        log_channel = guild.get_channel(log_channel_id)
+        if log_channel:
+            await log_channel.send(embed=embed)
+    except Exception:
+        pass
+
+
+# -------------------------
+# Messages
+# -------------------------
+@bot.event
+async def on_message_delete(message):
+    if message.author.bot: return
+    embed = discord.Embed(
+        title="🗑️ Message Deleted",  # fa-trash
+        color=discord.Color.red(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    embed.add_field(name="User", value=message.author.mention, inline=False)
+    embed.add_field(name="Channel", value=message.channel.mention, inline=False)
+    embed.add_field(name="Content", value=message.content or "*Empty*", inline=False)
+    await send_log(message.guild, embed)
+
+
+@bot.event
+async def on_message_edit(before, after):
+    if before.author.bot: return
+    if before.content == after.content: return
+    embed = discord.Embed(
+        title="✏️ Message Edited",  # fa-pencil-alt
+        color=discord.Color.orange(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    embed.add_field(name="User", value=before.author.mention, inline=False)
+    embed.add_field(name="Channel", value=before.channel.mention, inline=False)
+    embed.add_field(name="Before", value=before.content or "*Empty*", inline=False)
+    embed.add_field(name="After", value=after.content or "*Empty*", inline=False)
+    await send_log(before.guild, embed)
+
+
+# -------------------------
+# Member Events
+# -------------------------
+@bot.event
+async def on_member_join(member):
+    embed = discord.Embed(
+        title="👤➕ Member Joined",  # fa-user-plus
+        description=f"{member.mention} joined the server!",
+        color=discord.Color.green(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    embed.set_thumbnail(url=member.display_avatar.url)
+    await send_log(member.guild, embed)
+
+
+@bot.event
+async def on_member_remove(member):
+    embed = discord.Embed(
+        title="👤➖ Member Left",  # fa-user-minus
+        description=f"{member} has left the server.",
+        color=discord.Color.red(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    await send_log(member.guild, embed)
+
+
+@bot.event
+async def on_member_ban(guild, user):
+    embed = discord.Embed(
+        title="⛔ Member Banned",  # fa-ban
+        description=f"{user} was banned from the server.",
+        color=discord.Color.dark_red(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    await send_log(guild, embed)
+
+
+@bot.event
+async def on_member_unban(guild, user):
+    embed = discord.Embed(
+        title="♻️ Member Unbanned",  # fa-sync
+        description=f"{user} was unbanned.",
+        color=discord.Color.green(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    await send_log(guild, embed)
+
+
+@bot.event
+async def on_member_update(before, after):
+    embed = discord.Embed(
+        title="👤 Member Updated",  # fa-user
+        color=discord.Color.blue(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    embed.add_field(name="User", value=after.mention, inline=False)
+
+    if before.nick != after.nick:
+        embed.add_field(name="Nickname", value=f"`{before.nick}` → `{after.nick}`", inline=False)
+
+    if before.roles != after.roles:
+        before_roles = ", ".join([r.mention for r in before.roles if r != before.guild.default_role])
+        after_roles = ", ".join([r.mention for r in after.roles if r != after.guild.default_role])
+        embed.add_field(name="Roles Before", value=before_roles or "None", inline=False)
+        embed.add_field(name="Roles After", value=after_roles or "None", inline=False)
+
+    await send_log(after.guild, embed)
+
+
+# -------------------------
+# Voice Events
+# -------------------------
+@bot.event
+async def on_voice_state_update(member, before, after):
+    if before.channel != after.channel:
+        if before.channel is None:
+            desc = f"{member.mention} joined {after.channel.mention}"
+            title = "🎙️➕ Voice Join"  # fa-microphone
+            color = discord.Color.green()
+        elif after.channel is None:
+            desc = f"{member.mention} left {before.channel.mention}"
+            title = "🎙️➖ Voice Leave"  # fa-microphone-slash
+            color = discord.Color.red()
+        else:
+            desc = f"{member.mention} switched {before.channel.mention} → {after.channel.mention}"
+            title = "🔀 Voice Switch"  # fa-random
+            color = discord.Color.orange()
+
+        embed = discord.Embed(
+            title=title,
+            description=desc,
+            color=color,
+            timestamp=datetime.now(timezone.utc)
+        )
+        await send_log(member.guild, embed)
+
+    # Mute/deafen/stream/video changes
+    changes = []
+    if before.self_mute != after.self_mute:
+        changes.append("🔇 Muted" if after.self_mute else "🔊 Unmuted")  # fa-microphone-slash
+    if before.self_deaf != after.self_deaf:
+        changes.append("🙉 Deafened" if after.self_deaf else "👂 Undeafened")  # fa-deaf
+    if before.self_stream != after.self_stream:
+        changes.append("📺 Started Streaming" if after.self_stream else "🛑 Stopped Streaming")  # fa-desktop
+    if before.self_video != after.self_video:
+        changes.append("📹 Camera On" if after.self_video else "📷 Camera Off")  # fa-video
+
+    if changes:
+        embed = discord.Embed(
+            title="🎧 Voice State Updated",  # fa-headphones
+            description=f"{member.mention}\n" + "\n".join(changes),
+            color=discord.Color.blurple(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        await send_log(member.guild, embed)
+
+
+# -------------------------
+# Channel Events
+# -------------------------
+@bot.event
+async def on_guild_channel_create(channel):
+    embed = discord.Embed(
+        title="📂➕ Channel Created",  # fa-folder-plus
+        description=f"Channel {channel.mention} created.",
+        color=discord.Color.green(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    await send_log(channel.guild, embed)
+
+
+@bot.event
+async def on_guild_channel_delete(channel):
+    embed = discord.Embed(
+        title="📂➖ Channel Deleted",  # fa-folder-minus
+        description=f"Channel `{channel.name}` deleted.",
+        color=discord.Color.red(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    await send_log(channel.guild, embed)
+
+
+@bot.event
+async def on_guild_channel_update(before, after):
+    if before.name != after.name:
+        embed = discord.Embed(
+            title="📂✏️ Channel Renamed",  # fa-edit
+            description=f"`{before.name}` → `{after.name}`",
+            color=discord.Color.orange(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        await send_log(after.guild, embed)
+
+
+# -------------------------
+# Role Events
+# -------------------------
+@bot.event
+async def on_guild_role_create(role):
+    embed = discord.Embed(
+        title="🎭➕ Role Created",  # fa-id-badge
+        description=f"Role {role.mention} created.",
+        color=discord.Color.green(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    await send_log(role.guild, embed)
+
+
+@bot.event
+async def on_guild_role_delete(role):
+    embed = discord.Embed(
+        title="🎭➖ Role Deleted",  # fa-id-badge
+        description=f"Role `{role.name}` deleted.",
+        color=discord.Color.red(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    await send_log(role.guild, embed)
+
+
+@bot.event
+async def on_guild_role_update(before, after):
+    changes = []
+    if before.name != after.name:
+        changes.append(f"Name: `{before.name}` → `{after.name}`")
+    if before.color != after.color:
+        changes.append(f"Color: `{before.color}` → `{after.color}`")
+
+    if changes:
+        embed = discord.Embed(
+            title="🎭✏️ Role Updated",  # fa-id-badge
+            description="\n".join(changes),
+            color=discord.Color.orange(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        await send_log(after.guild, embed)
+        
 # =========================
 # AutoMod (Wick-style)
 # =========================
@@ -738,6 +886,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
