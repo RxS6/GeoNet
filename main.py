@@ -10,6 +10,9 @@ import asyncio
 from discord.ui import View, Button
 import aiohttp
 import pycountry
+# Top of your bot file, after imports
+GEMINI_API_KEY = "AIzaSyA9SRj3FsAM__9SigW2UVQa95ISO0nBzaQ"
+
 # =========================
 # CONFIG / IDS
 # =========================
@@ -967,6 +970,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
