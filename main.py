@@ -9,9 +9,6 @@ from keep_alive import keep_alive
 import asyncio
 from discord.ui import View, Button
 import aiohttp
-import pycountry
-# Top of your bot file, after imports
-GEMINI_API_KEY = "AIzaSyA9SRj3FsAM__9SigW2UVQa95ISO0nBzaQ"
 
 # =========================
 # CONFIG / IDS
@@ -826,78 +823,6 @@ async def remindme(ctx, time: str, *, reminder: str):
     await ctx.send(f"⏰ Reminder for {ctx.author.mention}: {reminder}")
 
 # =========================
-# Translation
-# =========================
-@bot.command(name="tr")
-async def translate_cmd(ctx, target: str = None, *, text: str = None):
-    """
-    🌐 Gemini Premium Translation
-    Usage:
-      $tr <text> → Auto-detect → English
-      $tr <lang> <text> → Translate into specific language
-      Reply to a message → Translate that message
-    """
-    # 1️⃣ Get text from reply
-    if ctx.message.reference and text is None:
-        ref_msg = await ctx.channel.fetch_message(ctx.message.reference.message_id)
-        text = ref_msg.content
-        if not target:
-            target = "EN"
-    # 2️⃣ Get text from command input
-    elif text is None:
-        if not target:
-            return await ctx.send("❌ Please provide text to translate or reply to a message.")
-        text = target
-        target = "EN"
-
-    target = target.upper()
-
-    # Validate language code
-    try:
-        lang_name = pycountry.languages.get(alpha_2=target).name
-        flag = get_flag_emoji(target)
-    except:
-        lang_name = target
-        flag = ""
-
-    # Gemini API call
-    async with aiohttp.ClientSession() as session:
-        headers = {"Authorization": f"Bearer {GEMINI_API_KEY}"}
-        payload = {"text": text, "target_lang": target}
-        try:
-            async with session.post("https://api.gemini.com/v1/translate", json=payload, headers=headers) as resp:
-                if resp.status != 200:
-                    return await ctx.send(f"❌ Translation failed: HTTP {resp.status}")
-                data = await resp.json()
-                translated_text = data.get("translated_text", "❌ No translation returned")
-                detected_lang = data.get("detected_source_lang", "AUTO")
-        except Exception as e:
-            return await ctx.send(f"❌ Translation failed: {e}")
-
-    detected_flag = get_flag_emoji(detected_lang)
-    try:
-        detected_name = pycountry.languages.get(alpha_2=detected_lang).name
-    except:
-        detected_name = detected_lang
-
-    # Truncate long texts
-    max_len = 1024
-    src_text = text if len(text) <= max_len else text[:max_len] + "…"
-    tgt_text = translated_text if len(translated_text) <= max_len else translated_text[:max_len] + "…"
-
-    # Embed
-    embed = discord.Embed(
-        title=f"🌐 Gemini Translation {flag}",
-        color=discord.Color.blurple(),
-        timestamp=datetime.now(timezone.utc)
-    )
-    embed.add_field(name=f"🗣 Source ({detected_name} {detected_flag})", value=f"```{src_text}```", inline=False)
-    embed.add_field(name=f"🔁 Target ({lang_name} {flag})", value=f"```{tgt_text}```", inline=False)
-    embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
-
-    await ctx.send(embed=embed)    
-    
-# =========================
 # Help
 # =========================
 @bot.command()
@@ -970,6 +895,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
