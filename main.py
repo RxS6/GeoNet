@@ -8,9 +8,8 @@ from collections import defaultdict
 from keep_alive import keep_alive
 import asyncio
 from discord.ui import View, Button
-from googletrans import Translator
-translator = Translator()
-
+import aiohttp
+import pycountry
 # =========================
 # CONFIG / IDS
 # =========================
@@ -798,6 +797,9 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
+# =========================
+# Remind
+# =========================   
 @bot.command()
 async def remindme(ctx, time: str, *, reminder: str):
     """Set a reminder. Usage: $remindme 10m Take a break!"""
@@ -820,37 +822,66 @@ async def remindme(ctx, time: str, *, reminder: str):
     await asyncio.sleep(delay)
     await ctx.send(f"⏰ Reminder for {ctx.author.mention}: {reminder}")
 
-@bot.command(name="tr")
-async def translate_reply(ctx):
+# =========================
+# Translation
+# =========================
+GEMINI_API_KEY = "AIzaSyA9SRj3FsAM__9SigW2UVQa95ISO0nBzaQ"
+
+def get_flag_emoji(alpha_2):
     try:
-        if not ctx.message.reference:
-            return await ctx.send("⚠️ Please reply to a message to translate it.")
+        return chr(127397 + ord(alpha_2[0].upper())) + chr(127397 + ord(alpha_2[1].upper()))
+    except:
+        return ""
 
-        # Get the replied message
-        replied_message = await ctx.channel.fetch_message(ctx.message.reference.message_id)
-        text = replied_message.content
+@bot.command(name="tr")
+async def translate_cmd(ctx, target: str = "EN", *, text: str = None):
+    if ctx.message.reference and text is None:
+        ref_msg = await ctx.channel.fetch_message(ctx.message.reference.message_id)
+        text = ref_msg.content
+    elif text is None:
+        if len(target) <= 3:
+            return await ctx.send("❌ Please provide text to translate or reply to a message.")
+        text = target
+        target = "EN"
 
-        if not text:
-            return await ctx.send("⚠️ That message has no text to translate.")
+    target = target.upper()
 
-        # Translate to English
-        result = translator.translate(text, dest="en")
+    try:
+        lang_name = pycountry.languages.get(alpha_2=target).name
+        flag = get_flag_emoji(target)
+    except:
+        lang_name = target
+        flag = ""
 
-        # Output like Notsobot
-        detected_lang = result.src.title()  # e.g., "Arabic"
-        target_lang = "English"
+    async with aiohttp.ClientSession() as session:
+        headers = {"Authorization": f"Bearer {GEMINI_API_KEY}"}
+        payload = {"text": text, "target_lang": target}
+        try:
+            async with session.post("https://api.gemini.com/v1/translate", json=payload, headers=headers) as resp:
+                if resp.status != 200:
+                    return await ctx.send(f"❌ Translation failed: HTTP {resp.status}")
+                data = await resp.json()
+                translated_text = data.get("translated_text", None)
+                detected_lang = data.get("detected_source_lang", "AUTO")
+        except Exception as e:
+            return await ctx.send(f"❌ Translation failed: {e}")
 
-        response = (
-            f"**Translated from {detected_lang} to {target_lang}**\n"
-            f"{detected_lang} → {target_lang}\n"
-            f"```\n{result.text}\n```\n"
-            f"*Google Translate*"
-        )
+    # Truncate long texts
+    max_len = 1024
+    src_text = text if len(text) <= max_len else text[:max_len] + "…"
+    tgt_text = translated_text if len(translated_text) <= max_len else translated_text[:max_len] + "…"
 
-        await ctx.reply(response)
-    except Exception as e:
-        await ctx.send(f"⚠️ Could not translate: {e}")
+    embed = discord.Embed(
+        title=f"🌐 Gemini Translation {flag}",
+        color=discord.Color.blurple(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    embed.add_field(name=f"🗣 Source ({detected_lang})", value=f"```{src_text}```", inline=False)
+    embed.add_field(name=f"🔁 Target ({lang_name})", value=f"```{tgt_text}```", inline=False)
+    embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
 
+    await ctx.send(embed=embed) 
+    
 # =========================
 # Help
 # =========================
@@ -924,6 +955,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
