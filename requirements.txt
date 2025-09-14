@@ -5,3 +5,4 @@ python-dotenv
 aiohttp
 schedule
 aiosqlite
+googletrans==4.0.0-rc1
