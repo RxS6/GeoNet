@@ -825,34 +825,42 @@ async def remindme(ctx, time: str, *, reminder: str):
 # =========================
 # Translation
 # =========================
-GEMINI_API_KEY = "AIzaSyA9SRj3FsAM__9SigW2UVQa95ISO0nBzaQ"
-
-def get_flag_emoji(alpha_2):
-    try:
-        return chr(127397 + ord(alpha_2[0].upper())) + chr(127397 + ord(alpha_2[1].upper()))
-    except:
-        return ""
-
 @bot.command(name="tr")
-async def translate_cmd(ctx, target: str = "EN", *, text: str = None):
-    if ctx.message.reference and text is None:
+async def translate_cmd(ctx, *, target_or_text: str = None):
+    """
+    🌐 Gemini Premium Translation (Pro)
+    - Reply to a foreign message with $tr → Auto-detect → English
+    - $tr <lang> <text> → Translate into a specific language
+    """
+
+    if not GEMINI_API_KEY:
+        return await ctx.send("❌ Gemini API key not set. Please set GEMINI_API_KEY in environment variables.")
+
+    # Determine text and target
+    if ctx.message.reference:
         ref_msg = await ctx.channel.fetch_message(ctx.message.reference.message_id)
         text = ref_msg.content
-    elif text is None:
-        if len(target) <= 3:
-            return await ctx.send("❌ Please provide text to translate or reply to a message.")
-        text = target
         target = "EN"
+    else:
+        if not target_or_text:
+            return await ctx.send("❌ Please provide text to translate or reply to a message.")
+        parts = target_or_text.split(maxsplit=1)
+        if len(parts) == 1:
+            text = parts[0]
+            target = "EN"
+        else:
+            target = parts[0].upper()
+            text = parts[1]
 
-    target = target.upper()
-
+    # Try to get language name and flag; fallback if unknown
     try:
         lang_name = pycountry.languages.get(alpha_2=target).name
         flag = get_flag_emoji(target)
-    except:
+    except Exception:
         lang_name = target
         flag = ""
 
+    # Call Gemini API
     async with aiohttp.ClientSession() as session:
         headers = {"Authorization": f"Bearer {GEMINI_API_KEY}"}
         payload = {"text": text, "target_lang": target}
@@ -861,26 +869,35 @@ async def translate_cmd(ctx, target: str = "EN", *, text: str = None):
                 if resp.status != 200:
                     return await ctx.send(f"❌ Translation failed: HTTP {resp.status}")
                 data = await resp.json()
-                translated_text = data.get("translated_text", None)
+                translated_text = data.get("translated_text", "❌ No translation returned")
                 detected_lang = data.get("detected_source_lang", "AUTO")
         except Exception as e:
             return await ctx.send(f"❌ Translation failed: {e}")
+
+    # Fallback for detected language flag
+    try:
+        detected_flag = get_flag_emoji(detected_lang)
+        detected_name = pycountry.languages.get(alpha_2=detected_lang).name
+    except:
+        detected_flag = ""
+        detected_name = detected_lang
 
     # Truncate long texts
     max_len = 1024
     src_text = text if len(text) <= max_len else text[:max_len] + "…"
     tgt_text = translated_text if len(translated_text) <= max_len else translated_text[:max_len] + "…"
 
+    # Embed output
     embed = discord.Embed(
         title=f"🌐 Gemini Translation {flag}",
         color=discord.Color.blurple(),
         timestamp=datetime.now(timezone.utc)
     )
-    embed.add_field(name=f"🗣 Source ({detected_lang})", value=f"```{src_text}```", inline=False)
-    embed.add_field(name=f"🔁 Target ({lang_name})", value=f"```{tgt_text}```", inline=False)
+    embed.add_field(name=f"🗣 Source ({detected_name} {detected_flag})", value=f"```{src_text}```", inline=False)
+    embed.add_field(name=f"🔁 Target ({lang_name} {flag})", value=f"```{tgt_text}```", inline=False)
     embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
 
-    await ctx.send(embed=embed) 
+    await ctx.send(embed=embed)
     
 # =========================
 # Help
@@ -955,6 +972,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
