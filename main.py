@@ -8,6 +8,8 @@ from collections import defaultdict
 from keep_alive import keep_alive
 import asyncio
 from discord.ui import View, Button
+from googletrans import Translator
+translator = Translator()
 
 # =========================
 # CONFIG / IDS
@@ -818,6 +820,37 @@ async def remindme(ctx, time: str, *, reminder: str):
     await asyncio.sleep(delay)
     await ctx.send(f"⏰ Reminder for {ctx.author.mention}: {reminder}")
 
+@bot.command(name="tr")
+async def translate_reply(ctx):
+    try:
+        if not ctx.message.reference:
+            return await ctx.send("⚠️ Please reply to a message to translate it.")
+
+        # Get the replied message
+        replied_message = await ctx.channel.fetch_message(ctx.message.reference.message_id)
+        text = replied_message.content
+
+        if not text:
+            return await ctx.send("⚠️ That message has no text to translate.")
+
+        # Translate to English
+        result = translator.translate(text, dest="en")
+
+        # Output like Notsobot
+        detected_lang = result.src.title()  # e.g., "Arabic"
+        target_lang = "English"
+
+        response = (
+            f"**Translated from {detected_lang} to {target_lang}**\n"
+            f"{detected_lang} → {target_lang}\n"
+            f"```\n{result.text}\n```\n"
+            f"*Google Translate*"
+        )
+
+        await ctx.reply(response)
+    except Exception as e:
+        await ctx.send(f"⚠️ Could not translate: {e}")
+
 # =========================
 # Help
 # =========================
@@ -891,6 +924,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
