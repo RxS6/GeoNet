@@ -9,6 +9,7 @@ from keep_alive import keep_alive
 import asyncio
 from discord.ui import View, Button
 import aiohttp
+import random
 
 # =========================
 # CONFIG / IDS
@@ -823,7 +824,7 @@ async def remindme(ctx, time: str, *, reminder: str):
     await ctx.send(f"⏰ Reminder for {ctx.author.mention}: {reminder}")
 
 # =========================
-# Level System
+# Level System (Arcane Style)
 # =========================
 
 DB_PATH = "levels.db"
@@ -858,10 +859,14 @@ async def setup_db():
 
 
 def get_level(xp: int) -> int:
-    return int(xp ** 0.5)  # square root formula
+    # Arcane style formula: sqrt
+    return int(xp ** 0.5)
 
 
-async def add_xp(user_id: int, amount: int = 10) -> tuple[int, int]:
+async def add_xp(user_id: int, amount: int = None) -> tuple[int, int]:
+    if amount is None:
+        amount = random.randint(15, 25)  # Arcane-like random XP
+
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("SELECT xp, last_level FROM levels WHERE user_id = ?", (user_id,))
         row = await cur.fetchone()
@@ -905,10 +910,13 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    xp, last_level = await add_xp(message.author.id, 10)
+    # Prevent XP gain from commands
+    if message.content.startswith("$"):
+        return await bot.process_commands(message)
+
+    xp, last_level = await add_xp(message.author.id)
     level = get_level(xp)
 
-    # Check if leveled up
     if level > last_level:
         await set_last_level(message.author.id, level)
 
@@ -922,6 +930,10 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
+
+# =========================
+# Commands
+# =========================
 
 @bot.command()
 async def rank(ctx, member: discord.Member = None):
@@ -958,7 +970,30 @@ async def top(ctx, count: int = 10):
         )
 
     await ctx.send(embed=embed)
-    
+
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def addxp(ctx, member: discord.Member, amount: int):
+    """Add XP to a user (Admin only)"""
+    xp, last_level = await add_xp(member.id, amount)
+    level = get_level(xp)
+    await ctx.send(f"✅ Added **{amount} XP** to {member.mention}. They now have **{xp} XP** (Level {level}).")
+
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def xpreset(ctx, member: discord.Member = None):
+    """Reset XP (user or entire server)"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        if member:
+            await db.execute("UPDATE levels SET xp = 0, last_level = 0 WHERE user_id = ?", (member.id,))
+            await ctx.send(f"♻️ Reset XP for {member.mention}. They are now Level **0** with **0 XP**.")
+        else:
+            await db.execute("DELETE FROM levels")  # reset all
+            await ctx.send("♻️ Reset XP for **everyone**. All users are now Level **0** with **0 XP**.")
+        await db.commit()
+        
 # =========================
 # Help
 # =========================
@@ -1028,6 +1063,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
