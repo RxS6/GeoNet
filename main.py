@@ -823,6 +823,143 @@ async def remindme(ctx, time: str, *, reminder: str):
     await ctx.send(f"⏰ Reminder for {ctx.author.mention}: {reminder}")
 
 # =========================
+# Level System
+# =========================
+
+DB_PATH = "levels.db"
+
+LEVEL_ROLES = {
+    3: 1412060231051116624,
+    10: 1412060481660784751,
+    15: 1412060703698718861,
+    20: 1412060818819907616,
+    25: 1412060922729726012,
+    30: 1412061110965764136,
+    35: 1412061188946264194,
+    40: 1412061279857807421,
+    45: 1412061578907619490,
+    50: 1412061878405828669,
+    100: 1413626915767717969,
+}
+
+LEVEL_ROLES_CATEGORY = 1412062601755496551
+
+
+async def setup_db():
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS levels (
+                user_id INTEGER PRIMARY KEY,
+                xp INTEGER DEFAULT 0,
+                last_level INTEGER DEFAULT 0
+            )"""
+        )
+        await db.commit()
+
+
+def get_level(xp: int) -> int:
+    return int(xp ** 0.5)  # square root formula
+
+
+async def add_xp(user_id: int, amount: int = 10) -> tuple[int, int]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT xp, last_level FROM levels WHERE user_id = ?", (user_id,))
+        row = await cur.fetchone()
+
+        if row:
+            xp, last_level = row
+            xp += amount
+            await db.execute("UPDATE levels SET xp = ? WHERE user_id = ?", (xp, user_id))
+        else:
+            xp, last_level = amount, 0
+            await db.execute(
+                "INSERT INTO levels (user_id, xp, last_level) VALUES (?, ?, ?)",
+                (user_id, xp, last_level),
+            )
+
+        await db.commit()
+        return xp, last_level
+
+
+async def set_last_level(user_id: int, level: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE levels SET last_level = ? WHERE user_id = ?", (level, user_id))
+        await db.commit()
+
+
+async def get_xp(user_id: int) -> tuple[int, int]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT xp, last_level FROM levels WHERE user_id = ?", (user_id,))
+        row = await cur.fetchone()
+        return row if row else (0, 0)
+
+
+@bot.event
+async def on_ready():
+    await setup_db()
+    print("✅ Level system loaded.")
+
+
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+
+    xp, last_level = await add_xp(message.author.id, 10)
+    level = get_level(xp)
+
+    # Check if leveled up
+    if level > last_level:
+        await set_last_level(message.author.id, level)
+
+        if level in LEVEL_ROLES:
+            role = message.guild.get_role(LEVEL_ROLES[level])
+            if role:
+                await message.author.add_roles(role)
+                await message.channel.send(
+                    f"<@{message.author.id}> has reached level **{level}**. GG!"
+                )
+
+    await bot.process_commands(message)
+
+
+@bot.command()
+async def rank(ctx, member: discord.Member = None):
+    """Check your level and XP"""
+    member = member or ctx.author
+    xp, _ = await get_xp(member.id)
+    level = get_level(xp)
+    await ctx.send(f"📊 {member.mention} is Level **{level}** with **{xp} XP**.")
+
+
+@bot.command()
+async def top(ctx, count: int = 10):
+    """Show the top XP users"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT user_id, xp FROM levels ORDER BY xp DESC LIMIT ?", (count,))
+        rows = await cur.fetchall()
+
+    if not rows:
+        return await ctx.send("❌ No leaderboard data yet!")
+
+    embed = discord.Embed(
+        title="🏆 Server Leaderboard",
+        color=discord.Color.gold()
+    )
+
+    for i, (user_id, xp) in enumerate(rows, start=1):
+        member = ctx.guild.get_member(user_id)
+        name = member.display_name if member else f"User {user_id}"
+        level = get_level(xp)
+        embed.add_field(
+            name=f"#{i} {name}",
+            value=f"Level **{level}** | {xp} XP",
+            inline=False
+        )
+
+    await ctx.send(embed=embed)
+    
+# =========================
 # Help
 # =========================
 @bot.command()
@@ -848,10 +985,6 @@ async def help(ctx):
             "`$removerole @user @role` - Remove role",
             "`$purge [amount]` - Delete messages",
             "`$lock` / `$unlock` - Lock or unlock channel",
-        ],
-        "Productivity": [
-            "`$afk [reason]` - Set AFK status",
-            "`$remindme [time] [task]` - Set a reminder",
         ]
     }
 
@@ -895,6 +1028,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
