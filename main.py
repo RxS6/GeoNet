@@ -824,13 +824,24 @@ async def remindme(ctx, time: str, *, reminder: str):
     await ctx.send(f"⏰ Reminder for {ctx.author.mention}: {reminder}")
 
 # =========================
-# 💡 Suggestions System (Pro v3 - Paginated)
+# 💡 Suggestions System (Pro v5 - Clean & Professional)
 # =========================
+
+intents = discord.Intents.default()
+intents.messages = True
+intents.guilds = True
+intents.reactions = True
+intents.members = True
+
+bot = commands.Bot(command_prefix="$", intents=intents)
 
 SUGGESTION_CHANNEL_ID = 1417162611950096534   # Suggestion channel
 CO_OWNER_ROLE_ID = 1410667328571576360        # Co-Owner role
 
-# DB init
+
+# =========================
+# DB INIT
+# =========================
 async def init_suggestions_db():
     async with aiosqlite.connect("bot.db") as db:
         await db.execute("""
@@ -847,7 +858,15 @@ async def init_suggestions_db():
         await db.commit()
 
 
-# Submit suggestion
+@bot.event
+async def on_ready():
+    await init_suggestions_db()
+    print(f"✅ Suggestions Pro v5 loaded as {bot.user}")
+
+
+# =========================
+# SUBMIT SUGGESTION
+# =========================
 @bot.command(name="suggest")
 async def suggest(ctx, *, idea: str):
     channel = ctx.guild.get_channel(SUGGESTION_CHANNEL_ID)
@@ -862,7 +881,7 @@ async def suggest(ctx, *, idea: str):
     )
     embed.add_field(name="👤 Suggested by", value=ctx.author.mention, inline=False)
     embed.add_field(name="📌 Status", value="Pending", inline=False)
-    embed.set_footer(text="Suggestion System | Sapphire")
+    embed.set_footer(text="Suggestion System | Sapphire Pro v5")
 
     msg = await channel.send(embed=embed)
     await msg.add_reaction("👍")
@@ -878,7 +897,9 @@ async def suggest(ctx, *, idea: str):
     await ctx.send(f"✅ Your suggestion has been posted in {channel.mention}!")
 
 
-# User’s suggestions
+# =========================
+# USER’S SUGGESTIONS
+# =========================
 @bot.command(name="mysuggestions")
 async def mysuggestions(ctx):
     async with aiosqlite.connect("bot.db") as db:
@@ -902,7 +923,9 @@ async def mysuggestions(ctx):
     await ctx.send(embed=embed)
 
 
-# Helper: update status + DM notify
+# =========================
+# STATUS HELPER
+# =========================
 async def update_status(ctx, suggestion_id: int, status: str, color: discord.Color, emoji: str):
     async with aiosqlite.connect("bot.db") as db:
         cursor = await db.execute("SELECT message_id, channel_id, user_id FROM suggestions WHERE id = ?", (suggestion_id,))
@@ -932,7 +955,9 @@ async def update_status(ctx, suggestion_id: int, status: str, color: discord.Col
     await ctx.send(f"{emoji} Suggestion #{suggestion_id} marked as **{status}**.")
 
 
-# Approve
+# =========================
+# STATUS COMMANDS
+# =========================
 @bot.command(name="suggest-approve")
 async def suggest_approve(ctx, suggestion_id: int):
     if CO_OWNER_ROLE_ID not in [r.id for r in ctx.author.roles]:
@@ -940,7 +965,6 @@ async def suggest_approve(ctx, suggestion_id: int):
     await update_status(ctx, suggestion_id, "Approved", discord.Color.green(), "✅")
 
 
-# Deny
 @bot.command(name="suggest-deny")
 async def suggest_deny(ctx, suggestion_id: int):
     if CO_OWNER_ROLE_ID not in [r.id for r in ctx.author.roles]:
@@ -948,7 +972,6 @@ async def suggest_deny(ctx, suggestion_id: int):
     await update_status(ctx, suggestion_id, "Denied", discord.Color.red(), "❌")
 
 
-# Under Review
 @bot.command(name="suggest-maybe")
 async def suggest_maybe(ctx, suggestion_id: int):
     if CO_OWNER_ROLE_ID not in [r.id for r in ctx.author.roles]:
@@ -956,7 +979,9 @@ async def suggest_maybe(ctx, suggestion_id: int):
     await update_status(ctx, suggestion_id, "Under Review", discord.Color.gold(), "🤔")
 
 
-# Suggestion List (Paginated)
+# =========================
+# PAGINATED LIST
+# =========================
 @bot.command(name="suggestlist")
 async def suggestlist(ctx, status: str = "Pending"):
     async with aiosqlite.connect("bot.db") as db:
@@ -1073,6 +1098,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
