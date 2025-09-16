@@ -864,7 +864,7 @@ async def suggest(ctx, *, idea: str = None):
         await db.commit()
 
         cursor = await db.execute("INSERT INTO suggestions (user_id, channel_id, suggestion, created_at) VALUES (?, ?, ?, ?)",
-                                  (ctx.author.id, channel.id, idea, datetime.datetime.utcnow()))
+                                  (ctx.author.id, channel.id, idea, datetime.utcnow()))
         await db.commit()
         suggestion_id = cursor.lastrowid
 
@@ -873,7 +873,7 @@ async def suggest(ctx, *, idea: str = None):
         title=f"💡 Suggestion #{suggestion_id}",
         description=f"```{idea}```",
         color=discord.Color.blurple(),
-        timestamp=datetime.datetime.utcnow()
+        timestamp=datetime.utcnow()
     )
     embed.add_field(name="👤 Suggested by", value=ctx.author.mention, inline=True)
     embed.add_field(name="📌 Status", value="⏳ Pending Approval", inline=True)
@@ -970,7 +970,7 @@ async def suggestlist(ctx, status: str = "Pending"):
         embed = discord.Embed(
             title=f"📋 Suggestions ({status})",
             color=discord.Color.blurple(),
-            timestamp=datetime.datetime.utcnow()
+            timestamp=datetime.utcnow()
         )
         for row in rows[i:i+per_page]:
             user = ctx.guild.get_member(row[2])
@@ -1071,6 +1071,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
