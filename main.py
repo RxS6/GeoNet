@@ -824,25 +824,31 @@ async def remindme(ctx, time: str, *, reminder: str):
     await ctx.send(f"⏰ Reminder for {ctx.author.mention}: {reminder}")
 
 # =========================
-# 💡 Suggestions System (Pro v5 - Clean & Professional)
+# 💡 Suggestion System (Pro v6.8)
 # =========================
 
-intents = discord.Intents.default()
-intents.messages = True
-intents.guilds = True
-intents.reactions = True
-intents.members = True
-
-bot = commands.Bot(command_prefix="$", intents=intents)
-
-SUGGESTION_CHANNEL_ID = 1417162611950096534   # Suggestion channel
+SUGGESTION_CHANNEL_ID = 1417162611950096534   # Your suggestion channel
 CO_OWNER_ROLE_ID = 1410667328571576360        # Co-Owner role
 
 
 # =========================
-# DB INIT
+# 📌 Suggest Command
 # =========================
-async def init_suggestions_db():
+@bot.command(name="suggest")
+async def suggest(ctx, *, idea: str = None):
+    if not idea:
+        error_embed = discord.Embed(
+            title="⚠️ Missing Suggestion",
+            description="You need to provide a suggestion.\n\n**Example:**\n```$suggest Add giveaways```",
+            color=discord.Color.red()
+        )
+        return await ctx.send(embed=error_embed)
+
+    channel = ctx.guild.get_channel(SUGGESTION_CHANNEL_ID)
+    if not channel:
+        return await ctx.send("❌ Suggestion channel not found! Please contact an admin.")
+
+    # DB Insert
     async with aiosqlite.connect("bot.db") as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS suggestions (
@@ -857,74 +863,40 @@ async def init_suggestions_db():
         """)
         await db.commit()
 
+        cursor = await db.execute("INSERT INTO suggestions (user_id, channel_id, suggestion, created_at) VALUES (?, ?, ?, ?)",
+                                  (ctx.author.id, channel.id, idea, datetime.datetime.utcnow()))
+        await db.commit()
+        suggestion_id = cursor.lastrowid
 
-@bot.event
-async def on_ready():
-    await init_suggestions_db()
-    print(f"✅ Suggestions Pro v5 loaded as {bot.user}")
-
-
-# =========================
-# SUBMIT SUGGESTION
-# =========================
-@bot.command(name="suggest")
-async def suggest(ctx, *, idea: str):
-    channel = ctx.guild.get_channel(SUGGESTION_CHANNEL_ID)
-    if not channel:
-        return await ctx.send("❌ Suggestion channel not found!")
-
+    # Embed
     embed = discord.Embed(
-        title="💡 New Suggestion",
-        description=idea,
+        title=f"💡 Suggestion #{suggestion_id}",
+        description=f"```{idea}```",
         color=discord.Color.blurple(),
         timestamp=datetime.datetime.utcnow()
     )
-    embed.add_field(name="👤 Suggested by", value=ctx.author.mention, inline=False)
-    embed.add_field(name="📌 Status", value="Pending", inline=False)
-    embed.set_footer(text="Suggestion System | Sapphire Pro v5")
+    embed.add_field(name="👤 Suggested by", value=ctx.author.mention, inline=True)
+    embed.add_field(name="📌 Status", value="⏳ Pending Approval", inline=True)
+    embed.set_footer(text="Suggestion System • Pro v6.8")
 
     msg = await channel.send(embed=embed)
     await msg.add_reaction("👍")
     await msg.add_reaction("👎")
 
     async with aiosqlite.connect("bot.db") as db:
-        await db.execute(
-            "INSERT INTO suggestions (user_id, message_id, channel_id, suggestion, created_at) VALUES (?, ?, ?, ?, ?)",
-            (ctx.author.id, msg.id, channel.id, idea, datetime.datetime.utcnow())
-        )
+        await db.execute("UPDATE suggestions SET message_id = ? WHERE id = ?", (msg.id, suggestion_id))
         await db.commit()
 
-    await ctx.send(f"✅ Your suggestion has been posted in {channel.mention}!")
-
-
-# =========================
-# USER’S SUGGESTIONS
-# =========================
-@bot.command(name="mysuggestions")
-async def mysuggestions(ctx):
-    async with aiosqlite.connect("bot.db") as db:
-        cursor = await db.execute("SELECT id, suggestion, status FROM suggestions WHERE user_id = ?", (ctx.author.id,))
-        rows = await cursor.fetchall()
-
-    if not rows:
-        return await ctx.send("❌ You have not submitted any suggestions.")
-
-    embed = discord.Embed(
-        title="📜 Your Suggestions",
-        color=discord.Color.blurple(),
-        timestamp=datetime.datetime.utcnow()
+    confirm = discord.Embed(
+        title="✅ Suggestion Submitted!",
+        description=f"Your suggestion has been posted in {channel.mention}.\n\n**ID:** `#{suggestion_id}`\n```{idea}```",
+        color=discord.Color.green()
     )
-    for row in rows:
-        embed.add_field(
-            name=f"ID #{row[0]} | Status: {row[2]}",
-            value=row[1][:1000],
-            inline=False
-        )
-    await ctx.send(embed=embed)
+    await ctx.send(embed=confirm)
 
 
 # =========================
-# STATUS HELPER
+# 🔧 Update Status
 # =========================
 async def update_status(ctx, suggestion_id: int, status: str, color: discord.Color, emoji: str):
     async with aiosqlite.connect("bot.db") as db:
@@ -935,9 +907,12 @@ async def update_status(ctx, suggestion_id: int, status: str, color: discord.Col
         return await ctx.send("❌ Suggestion not found.")
 
     channel = ctx.guild.get_channel(row[1])
+    if not channel:
+        return await ctx.send("❌ Channel not found.")
     msg = await channel.fetch_message(row[0])
+
     embed = msg.embeds[0]
-    embed.set_field_at(1, name="📌 Status", value=f"{emoji} {status} by {ctx.author.mention}", inline=False)
+    embed.set_field_at(1, name="📌 Status", value=f"{emoji} {status} by {ctx.author.mention}", inline=True)
     embed.color = color
     await msg.edit(embed=embed)
 
@@ -956,7 +931,7 @@ async def update_status(ctx, suggestion_id: int, status: str, color: discord.Col
 
 
 # =========================
-# STATUS COMMANDS
+# 🔒 Status Commands (Co-Owners Only)
 # =========================
 @bot.command(name="suggest-approve")
 async def suggest_approve(ctx, suggestion_id: int):
@@ -964,13 +939,11 @@ async def suggest_approve(ctx, suggestion_id: int):
         return await ctx.send("❌ You don’t have permission.")
     await update_status(ctx, suggestion_id, "Approved", discord.Color.green(), "✅")
 
-
 @bot.command(name="suggest-deny")
 async def suggest_deny(ctx, suggestion_id: int):
     if CO_OWNER_ROLE_ID not in [r.id for r in ctx.author.roles]:
         return await ctx.send("❌ You don’t have permission.")
     await update_status(ctx, suggestion_id, "Denied", discord.Color.red(), "❌")
-
 
 @bot.command(name="suggest-maybe")
 async def suggest_maybe(ctx, suggestion_id: int):
@@ -980,12 +953,12 @@ async def suggest_maybe(ctx, suggestion_id: int):
 
 
 # =========================
-# PAGINATED LIST
+# 📜 Suggestion List (Paginated)
 # =========================
 @bot.command(name="suggestlist")
 async def suggestlist(ctx, status: str = "Pending"):
     async with aiosqlite.connect("bot.db") as db:
-        cursor = await db.execute("SELECT id, suggestion, user_id FROM suggestions WHERE status = ?", (status,))
+        cursor = await db.execute("SELECT id, suggestion, user_id, status FROM suggestions WHERE status = ?", (status,))
         rows = await cursor.fetchall()
 
     if not rows:
@@ -1004,7 +977,7 @@ async def suggestlist(ctx, status: str = "Pending"):
             user_tag = user.mention if user else f"User ID {row[2]}"
             embed.add_field(
                 name=f"ID #{row[0]} | By {user_tag}",
-                value=row[1][:1000],
+                value=f"```{row[1][:500]}```\n📌 Status: **{row[3]}**",
                 inline=False
             )
         pages.append(embed)
@@ -1098,6 +1071,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
