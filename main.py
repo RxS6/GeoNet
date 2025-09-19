@@ -14,10 +14,10 @@ import random
 # =========================
 # CONFIG / IDS
 # =========================
-log_channel_id = 1415343089974902987
-staff_role1_id = 1410798804013289524
-staff_role2_id = 1410667335119016070
-autorole_id = 1410667353343000671
+log_channel_id = 1418641633750159493
+staff_role1_id = 1418641632236011662
+staff_role2_id = 1418641632148066431
+autorole_id = 1418641632059850878
 
 # storage for ephemeral features
 removed_roles = {}            # for rape/recover command
@@ -146,7 +146,7 @@ async def on_member_join(member):
         except Exception:
             pass
 
-        general_channel = member.guild.get_channel(1410667416903483522)  # General ka ID daal yaha
+        general_channel = member.guild.get_channel(1418641633322336349)  # General ka ID daal yaha
         if general_channel:
             await general_channel.send(
                 f"👋 Welcome {member.mention}, you’ve been given <@&{role.id}>!"
@@ -514,12 +514,16 @@ async def trial(ctx, member: discord.Member):
 @commands.has_permissions(manage_roles=True)
 async def cmd_permdemote(ctx, member: discord.Member):
     role_ids_to_remove = [
-        1410667335119016070,
-        1410685034884759582,
-        1410667334246469715,
-        1410667333105618954,
-        1410667331901718639,
-        1410667330467266707
+        1418641632148066431,
+        1418641632148066432,
+        1418641632148066433,
+        1418641632148066434,
+        1418641632148066435,
+        1418641632236011661,
+        1418641632236011662,
+        1418641632236011663,
+        1418641632236011664,
+        1418641632236011665
     ]
     roles_to_remove = [ctx.guild.get_role(rid) for rid in role_ids_to_remove if ctx.guild.get_role(rid) in member.roles]
     if roles_to_remove:
@@ -827,8 +831,8 @@ async def remindme(ctx, time: str, *, reminder: str):
 # 💡 Suggestion System (Pro v6.8)
 # =========================
 
-SUGGESTION_CHANNEL_ID = 1417162611950096534   # Your suggestion channel
-CO_OWNER_ROLE_ID = 1410667328571576360        # Co-Owner role
+SUGGESTION_CHANNEL_ID = 1418641633750159491   # Your suggestion channel
+CO_OWNER_ROLE_ID = 1418641632236011665        # Co-Owner role
 
 
 # =========================
@@ -1071,6 +1075,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
