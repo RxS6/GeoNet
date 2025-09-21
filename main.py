@@ -492,6 +492,129 @@ async def on_message(message):
         await send_log(message.guild, embed)
 
     await bot.process_commands(message)
+
+# =========================
+# 🛡️ Anti-Nuke Dynamic Whitelist (Pro v2.2)
+# =========================
+
+ANTINUKE_ROLE_ID = 1418641632236011669   # Only this role can manage Anti-Nuke
+
+# =========================
+# DB Init
+# =========================
+async def init_antinuke():
+    async with aiosqlite.connect("bot.db") as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS antinuke (
+                guild_id INTEGER PRIMARY KEY,
+                enabled BOOLEAN DEFAULT 0
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS antinuke_whitelist (
+                guild_id INTEGER,
+                user_id INTEGER,
+                PRIMARY KEY (guild_id, user_id)
+            )
+        """)
+        await db.commit()
+
+@bot.event
+async def on_ready():
+    await init_antinuke()
+    print("✅ Anti-Nuke System Ready (Pro v2.2)")
+
+# =========================
+# Helper: Check if enabled
+# =========================
+async def is_enabled(guild_id: int) -> bool:
+    async with aiosqlite.connect("bot.db") as db:
+        cursor = await db.execute("SELECT enabled FROM antinuke WHERE guild_id = ?", (guild_id,))
+        row = await cursor.fetchone()
+    return bool(row and row[0] == 1)
+
+# =========================
+# Helper: Check if user is whitelisted
+# =========================
+async def is_whitelisted(guild_id: int, user_id: int) -> bool:
+    async with aiosqlite.connect("bot.db") as db:
+        cursor = await db.execute("SELECT 1 FROM antinuke_whitelist WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
+        row = await cursor.fetchone()
+    return bool(row)  
+
+# =========================
+# Anti-Nuke Enable/Disable
+# =========================
+@bot.command(name="antinuke-enable")
+async def antinuke_enable(ctx):
+    if ANTINUKE_ROLE_ID not in [r.id for r in ctx.author.roles]:
+        return await ctx.send("❌ You don’t have permission to enable Anti-Nuke.")
+
+    async with aiosqlite.connect("bot.db") as db:
+        await db.execute("INSERT OR REPLACE INTO antinuke (guild_id, enabled) VALUES (?, ?)", (ctx.guild.id, 1))
+        await db.commit()
+
+    await ctx.send("✅ Anti-Nuke has been **enabled** for this server.")
+
+@bot.command(name="antinuke-disable")
+async def antinuke_disable(ctx):
+    if ANTINUKE_ROLE_ID not in [r.id for r in ctx.author.roles]:
+        return await ctx.send("❌ You don’t have permission to disable Anti-Nuke.")
+
+    async with aiosqlite.connect("bot.db") as db:
+        await db.execute("INSERT OR REPLACE INTO antinuke (guild_id, enabled) VALUES (?, ?)", (ctx.guild.id, 0))
+        await db.commit()
+
+    await ctx.send("⚠️ Anti-Nuke has been **disabled** for this server.")
+
+@bot.command(name="antinuke-status")
+async def antinuke_status(ctx):
+    enabled = await is_enabled(ctx.guild.id)
+    status = "🟢 Enabled" if enabled else "🔴 Disabled"
+    await ctx.send(f"📊 Anti-Nuke Status: **{status}**")
+
+# =========================
+# Whitelist Management
+# =========================
+@bot.command(name="antinuke-whitelist-add")
+async def whitelist_add(ctx, user: discord.Member):
+    if ANTINUKE_ROLE_ID not in [r.id for r in ctx.author.roles]:
+        return await ctx.send("❌ You don’t have permission to add whitelist users.")
+
+    async with aiosqlite.connect("bot.db") as db:
+        await db.execute("INSERT OR IGNORE INTO antinuke_whitelist (guild_id, user_id) VALUES (?, ?)", (ctx.guild.id, user.id))
+        await db.commit()
+
+    await ctx.send(f"✅ {user.mention} has been **added to the Anti-Nuke whitelist**.")
+
+@bot.command(name="antinuke-whitelist-remove")
+async def whitelist_remove(ctx, user: discord.Member):
+    if ANTINUKE_ROLE_ID not in [r.id for r in ctx.author.roles]:
+        return await ctx.send("❌ You don’t have permission to remove whitelist users.")
+
+    async with aiosqlite.connect("bot.db") as db:
+        await db.execute("DELETE FROM antinuke_whitelist WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, user.id))
+        await db.commit()
+
+    await ctx.send(f"✅ {user.mention} has been **removed from the Anti-Nuke whitelist**.")
+
+@bot.command(name="antinuke-whitelist-list")
+async def whitelist_list(ctx):
+    async with aiosqlite.connect("bot.db") as db:
+        cursor = await db.execute("SELECT user_id FROM antinuke_whitelist WHERE guild_id = ?", (ctx.guild.id,))
+        rows = await cursor.fetchall()
+
+    if not rows:
+        return await ctx.send("❌ No users are currently whitelisted for Anti-Nuke.")
+
+    mentions = []
+    for row in rows:
+        member = ctx.guild.get_member(row[0])
+        if member:
+            mentions.append(member.mention)
+        else:
+            mentions.append(f"User ID {row[0]}")
+    await ctx.send(f"📋 Whitelisted Users:\n" + "\n".join(mentions))
     
 # =========================
 # STAFF / FUN commands (trial, permdemote, rape/recover)
@@ -1125,6 +1248,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
