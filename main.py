@@ -1242,7 +1242,11 @@ async def help(ctx):
     first_category = list(categories.keys())[0]
     await ctx.send(embed=embeds[first_category], view=view)
 
+# =========================
+# Prefix
+# =========================
 import inspect
+import discord
 from discord import app_commands
 
 for cmd in bot.commands:
@@ -1270,12 +1274,12 @@ async def wrapper(interaction: discord.Interaction, {param_str}):
     await func(ctx, {param_str})
 """
     # Execute to create the wrapper
-    local_vars = {"func": func}
+    local_vars = {"func": func, "discord": discord}
     exec(func_str, globals(), local_vars)
     wrapper_func = local_vars["wrapper"]
 
     # Add type annotations
-    wrapper_func.__annotations__ = {**{"interaction": app_commands.Interaction}, **annotations}
+    wrapper_func.__annotations__ = {**{"interaction": discord.Interaction}, **annotations}
 
     # Register as slash command
     bot.tree.command(name=cmd.name, description=cmd.help or "No description")(wrapper_func)
@@ -1285,11 +1289,13 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
     await bot.tree.sync()
     print("All commands are now slash commands!")
+    
 # =========================
 # Run
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
