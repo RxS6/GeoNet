@@ -27,7 +27,7 @@ spam_tracker = defaultdict(list)  # anti-spam tracker
 DB_PATH = "roles.db"
 
 # =========================
-# DATABASE (cases table) - safe init with integrity check
+# DATABASE INIT (Safe & Multi-Table)
 # =========================
 def ensure_db_file():
     # If file exists, run integrity check. If it fails, remove file.
@@ -39,19 +39,23 @@ def ensure_db_file():
             res = cur.fetchone()
             con.close()
             if not res or res[0] != "ok":
-                print("⚠️ roles.db integrity check failed -> removing corrupt DB and recreating.")
+                print("⚠️ DB integrity check failed -> removing corrupt DB and recreating.")
                 os.remove(DB_PATH)
         except sqlite3.DatabaseError:
-            print("⚠️ roles.db is not a valid sqlite DB -> removing and recreating.")
+            print("⚠️ DB is not a valid sqlite DB -> removing and recreating.")
             try:
                 os.remove(DB_PATH)
             except Exception:
                 pass
 
+
 async def init_db():
     # Ensure DB file is valid (or removed) before using aiosqlite
     ensure_db_file()
     async with aiosqlite.connect(DB_PATH) as conn:
+        # =========================
+        # CASES TABLE
+        # =========================
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS cases (
                 case_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,54 +67,49 @@ async def init_db():
                 timestamp TEXT
             )
         ''')
+
+        # =========================
+        # ANTINUKE SETTINGS
+        # =========================
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS antinuke (
+                guild_id INTEGER PRIMARY KEY,
+                enabled INTEGER DEFAULT 0
+            )
+        ''')
+
+        # =========================
+        # SUGGESTIONS
+        # =========================
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS suggestions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                message_id INTEGER,
+                channel_id INTEGER,
+                suggestion TEXT,
+                status TEXT DEFAULT 'Pending',
+                created_at TIMESTAMP
+            )
+        ''')
+
+        # =========================
+        # LEVELS (XP SYSTEM)
+        # =========================
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS levels (
+                user_id INTEGER,
+                guild_id INTEGER,
+                xp INTEGER DEFAULT 0,
+                level INTEGER DEFAULT 0,
+                PRIMARY KEY (user_id, guild_id)
+            )
+        ''')
+
         await conn.commit()
+        print("✅ Database initialized with cases, antinuke, suggestions, and levels tables.")
 
-async def add_case(guild_id: int, user_id: int, moderator_id: int, action: str, reason: str):
-    ts = datetime.now(timezone.utc).isoformat()
-    async with aiosqlite.connect(DB_PATH) as conn:
-        await conn.execute(
-            'INSERT INTO cases (guild_id, user_id, moderator_id, action, reason, timestamp) VALUES (?, ?, ?, ?, ?, ?)',
-            (guild_id, user_id, moderator_id, action, reason, ts)
-        )
-        await conn.commit()
-        async with conn.execute('SELECT last_insert_rowid()') as cur:
-            row = await cur.fetchone()
-            return row[0] if row else None
 
-async def get_user_cases(guild_id: int, user_id: int):
-    async with aiosqlite.connect(DB_PATH) as conn:
-        async with conn.execute(
-            'SELECT case_id, moderator_id, action, reason, timestamp FROM cases WHERE guild_id = ? AND user_id = ? ORDER BY case_id ASC',
-            (guild_id, user_id)
-        ) as cursor:
-            return await cursor.fetchall()
-
-async def get_case_by_id(guild_id: int, case_id: int):
-    async with aiosqlite.connect(DB_PATH) as conn:
-        async with conn.execute(
-            'SELECT case_id, guild_id, user_id, moderator_id, action, reason, timestamp FROM cases WHERE case_id = ? AND guild_id = ?',
-            (case_id, guild_id)
-        ) as cur:
-            return await cur.fetchone()
-
-async def remove_case(case_id: int):
-    async with aiosqlite.connect(DB_PATH) as conn:
-        await conn.execute('DELETE FROM cases WHERE case_id = ?', (case_id,))
-        await conn.commit()
-
-async def get_case_counts(guild_id: int, user_id: int):
-    async with aiosqlite.connect(DB_PATH) as conn:
-        async with conn.execute(
-            'SELECT action, COUNT(*) FROM cases WHERE guild_id = ? AND user_id = ? GROUP BY action',
-            (guild_id, user_id)
-        ) as cur:
-            rows = await cur.fetchall()
-            counts = {"Warn": 0, "Mute": 0, "Kick": 0, "Ban": 0}
-            for action, cnt in rows:
-                if action in counts:
-                    counts[action] = cnt
-            return counts
-            
 # =========================
 # BOT setup
 # =========================
@@ -1295,6 +1294,7 @@ async def on_ready():
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
