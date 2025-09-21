@@ -1242,12 +1242,30 @@ async def help(ctx):
     first_category = list(categories.keys())[0]
     await ctx.send(embed=embeds[first_category], view=view)
 
+from discord import app_commands
+
+for cmd in bot.commands:
+    async def wrapper(interaction, **kwargs):
+        ctx = await bot.get_context(interaction.message)  # pseudo ctx
+        args = [kwargs[k] for k in kwargs]
+        await cmd.callback(ctx, *args)
+
+    # Register slash command with same name and description
+    bot.tree.command(name=cmd.name, description=cmd.help or "No description")(wrapper)
+
+@bot.event
+async def on_ready():
+    print(f"Logged in as {bot.user}")
+    await bot.tree.sync()  # sync all commands
+    print("All commands are now slash commands!")
+
 
 # =========================
 # Run
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
