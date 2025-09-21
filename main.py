@@ -116,9 +116,9 @@ async def get_case_counts(guild_id: int, user_id: int):
 # =========================
 intents = discord.Intents.all()
 
-# multiple prefixes ($ and !), plus mention
+# multiple prefixes (/ and mention)
 bot = commands.Bot(
-    command_prefix=commands.when_mentioned_or("$", "/"),
+    command_prefix=commands.when_mentioned_or("/"),
     intents=intents
 )
 
@@ -133,7 +133,7 @@ async def on_ready():
     # ensure DB and tables exist (and recreate if needed)
     await init_db()
     print(f'✅ Logged in as {bot.user} ({bot.user.id})')
-
+    
     
 # =========================
 # Autorole
@@ -1248,6 +1248,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
