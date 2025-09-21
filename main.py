@@ -1242,29 +1242,52 @@ async def help(ctx):
     first_category = list(categories.keys())[0]
     await ctx.send(embed=embeds[first_category], view=view)
 
+import inspect
 from discord import app_commands
 
 for cmd in bot.commands:
-    async def wrapper(interaction, **kwargs):
-        ctx = await bot.get_context(interaction.message)  # pseudo ctx
-        args = [kwargs[k] for k in kwargs]
-        await cmd.callback(ctx, *args)
+    func = cmd.callback
+    sig = inspect.signature(func)
+    # skip ctx
+    params = [p for p in sig.parameters.values() if p.name != "ctx"]
 
-    # Register slash command with same name and description
+    # Create slash command wrapper with proper type annotations
+    async def wrapper(interaction: discord.Interaction, **kwargs: str):
+        # pseudo ctx to call original command
+        class DummyCtx:
+            def __init__(self, interaction):
+                self.interaction = interaction
+                self.guild = interaction.guild
+                self.author = interaction.user
+                self.send = interaction.response.send_message
+
+            async def reply(self, *args, **kwargs):
+                await self.send(*args, **kwargs)
+
+        ctx = DummyCtx(interaction)
+        args = [kwargs[p.name] for p in params]
+        await func(ctx, *args)
+
+    # Build app command parameters
+    slash_params = {}
+    for p in params:
+        slash_params[p.name] = str  # default all params to string
+
+    # Register slash command
     bot.tree.command(name=cmd.name, description=cmd.help or "No description")(wrapper)
 
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}")
-    await bot.tree.sync()  # sync all commands
+    await bot.tree.sync()
     print("All commands are now slash commands!")
-
 
 # =========================
 # Run
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
