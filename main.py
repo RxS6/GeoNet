@@ -1251,42 +1251,46 @@ for cmd in bot.commands:
     # skip ctx
     params = [p for p in sig.parameters.values() if p.name != "ctx"]
 
-    # Create slash command wrapper with proper type annotations
-    async def wrapper(interaction: discord.Interaction, **kwargs: str):
-        # pseudo ctx to call original command
-        class DummyCtx:
-            def __init__(self, interaction):
-                self.interaction = interaction
-                self.guild = interaction.guild
-                self.author = interaction.user
-                self.send = interaction.response.send_message
+    # Build annotations dict (all str for simplicity)
+    annotations = {p.name: str for p in params}
 
-            async def reply(self, *args, **kwargs):
-                await self.send(*args, **kwargs)
+    # Dynamically create a function with the same parameters
+    param_str = ", ".join(p.name for p in params)
+    func_str = f"""
+async def wrapper(interaction: discord.Interaction, {param_str}):
+    class DummyCtx:
+        def __init__(self, interaction):
+            self.interaction = interaction
+            self.guild = interaction.guild
+            self.author = interaction.user
+            self.send = interaction.response.send_message
+        async def reply(self, *args, **kwargs):
+            await self.send(*args, **kwargs)
+    ctx = DummyCtx(interaction)
+    await func(ctx, {param_str})
+"""
+    # Execute to create the wrapper
+    local_vars = {"func": func}
+    exec(func_str, globals(), local_vars)
+    wrapper_func = local_vars["wrapper"]
 
-        ctx = DummyCtx(interaction)
-        args = [kwargs[p.name] for p in params]
-        await func(ctx, *args)
+    # Add type annotations
+    wrapper_func.__annotations__ = {**{"interaction": app_commands.Interaction}, **annotations}
 
-    # Build app command parameters
-    slash_params = {}
-    for p in params:
-        slash_params[p.name] = str  # default all params to string
-
-    # Register slash command
-    bot.tree.command(name=cmd.name, description=cmd.help or "No description")(wrapper)
+    # Register as slash command
+    bot.tree.command(name=cmd.name, description=cmd.help or "No description")(wrapper_func)
 
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}")
     await bot.tree.sync()
     print("All commands are now slash commands!")
-
 # =========================
 # Run
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
