@@ -79,6 +79,18 @@ async def init_db():
         ''')
 
         # =========================
+        # ANTINUKE WHITELIST
+        # =========================
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS antinuke_whitelist (
+                guild_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (guild_id, user_id)
+            )
+        ''')
+
+        # =========================
         # SUGGESTIONS
         # =========================
         await conn.execute('''
@@ -107,8 +119,8 @@ async def init_db():
         ''')
 
         await conn.commit()
-        print("✅ Database initialized with cases, antinuke, suggestions, and levels tables.")
-
+        print("✅ Database initialized with cases, antinuke, antinuke_whitelist, suggestions, and levels tables.")
+        
 
 # =========================
 # BOT setup
@@ -1294,6 +1306,7 @@ async def on_ready():
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
