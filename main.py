@@ -554,293 +554,271 @@ async def is_whitelisted(guild_id: int, user_id: int) -> bool:
     return bool(row)  
 
 # =========================
-# Anti-Nuke Enable/Disable
+# Anti-Nuke Enable/Disable (Slash Commands)
 # =========================
-@bot.command(name="antinuke-enable")
-async def antinuke_enable(ctx):
-    if ANTINUKE_ROLE_ID not in [r.id for r in ctx.author.roles]:
-        return await ctx.send("❌ You don’t have permission to enable Anti-Nuke.")
-
+@bot.tree.command(name="antinuke-enable", description="Enable Anti-Nuke protection for this server.")
+async def antinuke_enable(interaction: discord.Interaction):
+    if ANTINUKE_ROLE_ID not in [r.id for r in interaction.user.roles]:
+        return await interaction.response.send_message("❌ You don’t have permission to enable Anti-Nuke.", ephemeral=True)
     async with aiosqlite.connect("bot.db") as db:
-        await db.execute("INSERT OR REPLACE INTO antinuke (guild_id, enabled) VALUES (?, ?)", (ctx.guild.id, 1))
+        await db.execute("INSERT OR REPLACE INTO antinuke (guild_id, enabled) VALUES (?, ?)", (interaction.guild.id, 1))
         await db.commit()
+    await interaction.response.send_message("✅ Anti-Nuke has been **enabled** for this server.")
 
-    await ctx.send("✅ Anti-Nuke has been **enabled** for this server.")
-
-@bot.command(name="antinuke-disable")
-async def antinuke_disable(ctx):
-    if ANTINUKE_ROLE_ID not in [r.id for r in ctx.author.roles]:
-        return await ctx.send("❌ You don’t have permission to disable Anti-Nuke.")
-
+@bot.tree.command(name="antinuke-disable", description="Disable Anti-Nuke protection for this server.")
+async def antinuke_disable(interaction: discord.Interaction):
+    if ANTINUKE_ROLE_ID not in [r.id for r in interaction.user.roles]:
+        return await interaction.response.send_message("❌ You don’t have permission to disable Anti-Nuke.", ephemeral=True)
     async with aiosqlite.connect("bot.db") as db:
-        await db.execute("INSERT OR REPLACE INTO antinuke (guild_id, enabled) VALUES (?, ?)", (ctx.guild.id, 0))
+        await db.execute("INSERT OR REPLACE INTO antinuke (guild_id, enabled) VALUES (?, ?)", (interaction.guild.id, 0))
         await db.commit()
+    await interaction.response.send_message("⚠️ Anti-Nuke has been **disabled** for this server.")
 
-    await ctx.send("⚠️ Anti-Nuke has been **disabled** for this server.")
-
-@bot.command(name="antinuke-status")
-async def antinuke_status(ctx):
-    enabled = await is_enabled(ctx.guild.id)
+@bot.tree.command(name="antinuke-status", description="Check the status of Anti-Nuke protection.")
+async def antinuke_status(interaction: discord.Interaction):
+    enabled = await is_enabled(interaction.guild.id)
     status = "🟢 Enabled" if enabled else "🔴 Disabled"
-    await ctx.send(f"📊 Anti-Nuke Status: **{status}**")
+    await interaction.response.send_message(f"📊 Anti-Nuke Status: **{status}**")
 
 # =========================
 # Whitelist Management
 # =========================
-@bot.command(name="antinuke-whitelist-add")
-async def whitelist_add(ctx, user: discord.Member):
-    if ANTINUKE_ROLE_ID not in [r.id for r in ctx.author.roles]:
-        return await ctx.send("❌ You don’t have permission to add whitelist users.")
-
+@bot.tree.command(name="antinuke-whitelist-add", description="Add a user to the Anti-Nuke whitelist.")
+async def whitelist_add(interaction: discord.Interaction, user: discord.Member):
+    if ANTINUKE_ROLE_ID not in [r.id for r in interaction.user.roles]:
+        return await interaction.response.send_message("❌ You don’t have permission to add whitelist users.", ephemeral=True)
     async with aiosqlite.connect("bot.db") as db:
-        await db.execute("INSERT OR IGNORE INTO antinuke_whitelist (guild_id, user_id) VALUES (?, ?)", (ctx.guild.id, user.id))
+        await db.execute("INSERT OR IGNORE INTO antinuke_whitelist (guild_id, user_id) VALUES (?, ?)", (interaction.guild.id, user.id))
         await db.commit()
+    await interaction.response.send_message(f"✅ {user.mention} has been **added to the Anti-Nuke whitelist**.")
 
-    await ctx.send(f"✅ {user.mention} has been **added to the Anti-Nuke whitelist**.")
-
-@bot.command(name="antinuke-whitelist-remove")
-async def whitelist_remove(ctx, user: discord.Member):
-    if ANTINUKE_ROLE_ID not in [r.id for r in ctx.author.roles]:
-        return await ctx.send("❌ You don’t have permission to remove whitelist users.")
-
+@bot.tree.command(name="antinuke-whitelist-remove", description="Remove a user from the Anti-Nuke whitelist.")
+async def whitelist_remove(interaction: discord.Interaction, user: discord.Member):
+    if ANTINUKE_ROLE_ID not in [r.id for r in interaction.user.roles]:
+        return await interaction.response.send_message("❌ You don’t have permission to remove whitelist users.", ephemeral=True)
     async with aiosqlite.connect("bot.db") as db:
-        await db.execute("DELETE FROM antinuke_whitelist WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, user.id))
+        await db.execute("DELETE FROM antinuke_whitelist WHERE guild_id = ? AND user_id = ?", (interaction.guild.id, user.id))
         await db.commit()
+    await interaction.response.send_message(f"✅ {user.mention} has been **removed from the Anti-Nuke whitelist**.")
 
-    await ctx.send(f"✅ {user.mention} has been **removed from the Anti-Nuke whitelist**.")
-
-@bot.command(name="antinuke-whitelist-list")
-async def whitelist_list(ctx):
+@bot.tree.command(name="antinuke-whitelist-list", description="List all whitelisted users for Anti-Nuke.")
+async def whitelist_list(interaction: discord.Interaction):
     async with aiosqlite.connect("bot.db") as db:
-        cursor = await db.execute("SELECT user_id FROM antinuke_whitelist WHERE guild_id = ?", (ctx.guild.id,))
+        cursor = await db.execute("SELECT user_id FROM antinuke_whitelist WHERE guild_id = ?", (interaction.guild.id,))
         rows = await cursor.fetchall()
-
     if not rows:
-        return await ctx.send("❌ No users are currently whitelisted for Anti-Nuke.")
+        return await interaction.response.send_message("❌ No users are currently whitelisted for Anti-Nuke.")
+    mentions = [interaction.guild.get_member(row[0]).mention if interaction.guild.get_member(row[0]) else f"User ID {row[0]}" for row in rows]
+    await interaction.response.send_message(f"📋 Whitelisted Users:\n" + "\n".join(mentions))
 
-    mentions = []
-    for row in rows:
-        member = ctx.guild.get_member(row[0])
-        if member:
-            mentions.append(member.mention)
-        else:
-            mentions.append(f"User ID {row[0]}")
-    await ctx.send(f"📋 Whitelisted Users:\n" + "\n".join(mentions))
-    
 # =========================
-# STAFF / FUN commands (trial, permdemote, rape/recover)
+# Staff / Fun Commands
 # =========================
-@bot.command(name='trial')
-@commands.has_permissions(manage_roles=True)
-async def trial(ctx, member: discord.Member):
-    role1 = ctx.guild.get_role(staff_role1_id)
-    role2 = ctx.guild.get_role(staff_role2_id)
+@bot.tree.command(name="trial", description="Assign trial roles to a member.")
+async def trial(interaction: discord.Interaction, member: discord.Member):
+    if not interaction.user.guild_permissions.manage_roles:
+        return await interaction.response.send_message("❌ You don’t have permission.", ephemeral=True)
+    role1 = interaction.guild.get_role(staff_role1_id)
+    role2 = interaction.guild.get_role(staff_role2_id)
     if role1 and role2:
         try:
             await member.add_roles(role1, role2)
         except Exception:
             pass
-        await ctx.send(f"✅ Assigned <@&{role1.id}> and <@&{role2.id}> to {member.mention}.")
-        await log_command(ctx, f"Assigned trial roles to {member.mention}.", discord.Color.blue())
+        await interaction.response.send_message(f"✅ Assigned <@&{role1.id}> and <@&{role2.id}> to {member.mention}.")
+        await log_command(interaction, f"Assigned trial roles to {member.mention}.", discord.Color.blue())
     else:
-        await ctx.send("⚠️ Required trial roles not found.")
+        await interaction.response.send_message("⚠️ Required trial roles not found.")
 
-@bot.command(name='cmd_permdemote')
-@commands.has_permissions(manage_roles=True)
-async def cmd_permdemote(ctx, member: discord.Member):
+@bot.tree.command(name="cmd_permdemote", description="Remove high-level roles from a member permanently.")
+async def cmd_permdemote(interaction: discord.Interaction, member: discord.Member):
+    if not interaction.user.guild_permissions.manage_roles:
+        return await interaction.response.send_message("❌ You don’t have permission.", ephemeral=True)
     role_ids_to_remove = [
-        1418641632148066431,
-        1418641632148066432,
-        1418641632148066433,
-        1418641632148066434,
-        1418641632148066435,
-        1418641632236011661,
-        1418641632236011662,
-        1418641632236011663,
-        1418641632236011664,
-        1418641632236011665
+        1418641632148066431, 1418641632148066432, 1418641632148066433, 1418641632148066434,
+        1418641632148066435, 1418641632236011661, 1418641632236011662, 1418641632236011663,
+        1418641632236011664, 1418641632236011665
     ]
-    roles_to_remove = [ctx.guild.get_role(rid) for rid in role_ids_to_remove if ctx.guild.get_role(rid) in member.roles]
+    roles_to_remove = [interaction.guild.get_role(rid) for rid in role_ids_to_remove if interaction.guild.get_role(rid) in member.roles]
     if roles_to_remove:
         try:
             await member.remove_roles(*roles_to_remove)
         except Exception:
             pass
         mentions = " ".join([f"<@&{r.id}>" for r in roles_to_remove])
-        await ctx.send(f"✅ Removed {mentions} from {member.mention}.")
-        await log_command(ctx, f"Permdemoted {member.mention}. Roles removed: {mentions}", discord.Color.red())
+        await interaction.response.send_message(f"✅ Removed {mentions} from {member.mention}.")
+        await log_command(interaction, f"Permdemoted {member.mention}. Roles removed: {mentions}", discord.Color.red())
     else:
-        await ctx.send(f"{member.mention} has none of the target roles.")
+        await interaction.response.send_message(f"{member.mention} has none of the target roles.")
 
-@bot.command()
-@commands.has_permissions(manage_roles=True)
-async def rape(ctx, user: discord.Member):
+@bot.tree.command(name="rape", description="Remove all roles from a member (for recovery).")
+async def rape(interaction: discord.Interaction, user: discord.Member):
+    if not interaction.user.guild_permissions.manage_roles:
+        return await interaction.response.send_message("❌ You don’t have permission.", ephemeral=True)
     roles = user.roles[1:]
     if not roles:
-        await ctx.send(f"{user.mention} has no roles to remove!")
-        return
+        return await interaction.response.send_message(f"{user.mention} has no roles to remove!")
     removed_roles[user.id] = roles
     try:
         await user.remove_roles(*roles)
     except Exception:
         pass
-    await ctx.send(f"❌ Removed all roles from {user.mention} (stored for recovery).")
+    await interaction.response.send_message(f"❌ Removed all roles from {user.mention} (stored for recovery).")
 
-@bot.command()
-@commands.has_permissions(manage_roles=True)
-async def recover(ctx, user: discord.Member):
+@bot.tree.command(name="recover", description="Restore previously removed roles to a member.")
+async def recover(interaction: discord.Interaction, user: discord.Member):
+    if not interaction.user.guild_permissions.manage_roles:
+        return await interaction.response.send_message("❌ You don’t have permission.", ephemeral=True)
     if user.id not in removed_roles:
-        await ctx.send(f"{user.mention} has no roles stored for recovery!")
-        return
+        return await interaction.response.send_message(f"{user.mention} has no roles stored for recovery!")
     try:
         await user.add_roles(*removed_roles[user.id])
     except Exception:
         pass
     removed_roles.pop(user.id, None)
-    await ctx.send(f"✅ Recovered all roles for {user.mention}.")
+    await interaction.response.send_message(f"✅ Recovered all roles for {user.mention}.")
 
 # =========================
-# CASE-BASED moderation
+# CASE-BASED moderation (Slash Commands)
 # =========================
-@bot.command(name='warn')
-@commands.has_permissions(manage_roles=True)
-async def warn(ctx, member: discord.Member, *, reason: str = "No reason provided"):
+@bot.tree.command(name="warn", description="Warn a member and create a case.")
+async def warn(interaction: discord.Interaction, member: discord.Member, reason: str = "No reason provided"):
+    if not interaction.user.guild_permissions.manage_roles:
+        return await interaction.response.send_message("❌ You don’t have permission.", ephemeral=True)
     try:
-        case_id = await add_case(ctx.guild.id, member.id, ctx.author.id, "Warn", reason)
+        case_id = await add_case(interaction.guild.id, member.id, interaction.user.id, "Warn", reason)
     except Exception as e:
-        await ctx.send("⚠️ Unable to save case to database. Check bot logs.")
+        await interaction.response.send_message("⚠️ Unable to save case to database. Check bot logs.", ephemeral=True)
         print("add_case error:", e)
         return
-
-    counts = await get_case_counts(ctx.guild.id, member.id)
+    counts = await get_case_counts(interaction.guild.id, member.id)
     embed = discord.Embed(color=discord.Color.gold(), timestamp=datetime.now(timezone.utc))
     embed.description = f"✅ `Case #{case_id}` {member.mention} has been **warned**.\n\n**Reason:** *{reason}*"
-    await ctx.send(embed=embed)
-    await log_command(ctx, f"Warned {member} | Case #{case_id} | Reason: {reason}", discord.Color.orange())
+    await interaction.response.send_message(embed=embed)
+    await log_command(interaction, f"Warned {member} | Case #{case_id} | Reason: {reason}", discord.Color.orange())
 
-@bot.command(name='warnings')
-@commands.has_permissions(manage_roles=True)
-async def warnings_cmd(ctx, member: discord.Member = None):
-    member = member or ctx.author
+@bot.tree.command(name="warnings", description="List all warnings/cases for a member.")
+async def warnings_cmd(interaction: discord.Interaction, member: discord.Member = None):
+    if not interaction.user.guild_permissions.manage_roles:
+        return await interaction.response.send_message("❌ You don’t have permission.", ephemeral=True)
+    member = member or interaction.user
     try:
-        cases = await get_user_cases(ctx.guild.id, member.id)
+        cases = await get_user_cases(interaction.guild.id, member.id)
     except Exception as e:
-        await ctx.send("⚠️ Unable to read cases from database.")
+        await interaction.response.send_message("⚠️ Unable to read cases from database.", ephemeral=True)
         print("get_user_cases error:", e)
         return
-
     if not cases:
-        return await ctx.send(f"✅ {member.mention} has no cases.")
-    counts = await get_case_counts(ctx.guild.id, member.id)
+        return await interaction.response.send_message(f"✅ {member.mention} has no cases.")
+    counts = await get_case_counts(interaction.guild.id, member.id)
     embed = discord.Embed(title=f"📋 Cases for {member}", color=discord.Color.orange(), timestamp=datetime.now(timezone.utc))
     for cid, mod_id, action, reason, ts in cases:
-        moderator = ctx.guild.get_member(mod_id)
+        moderator = interaction.guild.get_member(mod_id)
         mod_name = str(moderator) if moderator else f"<@{mod_id}>"
-        # format timestamp
         try:
             ts_display = datetime.fromisoformat(ts).astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         except Exception:
             ts_display = str(ts)
         embed.add_field(name=f"Case #{cid} — {action}", value=f"**Moderator:** {mod_name}\n**Reason:** {reason}\n**At:** {ts_display}", inline=False)
     embed.set_footer(text=f"Warned: {counts['Warn']} | Muted: {counts['Mute']} | Kicked: {counts['Kick']} | Banned: {counts['Ban']}")
-    await ctx.send(embed=embed)
+    await interaction.response.send_message(embed=embed)
 
-@bot.command(name='unwarn')
-@commands.has_permissions(manage_roles=True)
-async def unwarn_cmd(ctx, case_id: int):
+@bot.tree.command(name="unwarn", description="Remove a specific warning case from a member.")
+async def unwarn_cmd(interaction: discord.Interaction, case_id: int):
+    if not interaction.user.guild_permissions.manage_roles:
+        return await interaction.response.send_message("❌ You don’t have permission.", ephemeral=True)
     try:
-        case = await get_case_by_id(ctx.guild.id, case_id)
+        case = await get_case_by_id(interaction.guild.id, case_id)
     except Exception as e:
-        await ctx.send("⚠️ Unable to read cases from database.")
+        await interaction.response.send_message("⚠️ Unable to read cases from database.", ephemeral=True)
         print("get_case_by_id error:", e)
         return
-
     if not case:
-        return await ctx.send("⚠️ Case not found.")
+        return await interaction.response.send_message("⚠️ Case not found.")
     cid, guild_id, user_id, mod_id, action, reason, ts = case
     if action != "Warn":
-        return await ctx.send("⚠️ That case is not a warn-type case.")
-    member = ctx.guild.get_member(user_id)
+        return await interaction.response.send_message("⚠️ That case is not a warn-type case.")
+    member = interaction.guild.get_member(user_id)
 
     embed = discord.Embed(title="⚠️ Confirm Unwarn", color=discord.Color.red(), timestamp=datetime.now(timezone.utc))
     embed.add_field(name="Member", value=f"{member if member else f'<@{user_id}>'}", inline=False)
     embed.add_field(name="Action", value="Warn", inline=True)
     embed.add_field(name="Reason", value=reason, inline=False)
     embed.set_footer(text="Reply with yes/no within 30s")
-
-    prompt = await ctx.send(embed=embed)
+    prompt = await interaction.response.send_message(embed=embed, fetch_response=True)
 
     def check(m):
-        return m.author == ctx.author and m.channel == ctx.channel and m.content.lower() in ("yes", "no")
+        return m.author == interaction.user and m.channel == interaction.channel and m.content.lower() in ("yes", "no")
 
     try:
         reply = await bot.wait_for('message', check=check, timeout=30.0)
     except asyncio.TimeoutError:
-        return await ctx.send("⏳ Confirmation timed out. Action cancelled.")
+        return await interaction.followup.send("⏳ Confirmation timed out. Action cancelled.", ephemeral=True)
 
     if reply.content.lower() == "yes":
         try:
             await remove_case(case_id)
         except Exception as e:
-            await ctx.send("⚠️ Unable to remove case from database.")
+            await interaction.followup.send("⚠️ Unable to remove case from database.", ephemeral=True)
             print("remove_case error:", e)
             return
-        await ctx.send(f"✅ Case #{case_id} for **{member if member else f'<@{user_id}>'}** has been removed.")
-        await log_command(ctx, f"Removed case #{case_id} for user {user_id}", discord.Color.green())
+        await interaction.followup.send(f"✅ Case #{case_id} for **{member if member else f'<@{user_id}>'}** has been removed.")
+        await log_command(interaction, f"Removed case #{case_id} for user {user_id}", discord.Color.green())
     else:
-        await ctx.send("❌ Action cancelled.")
+        await interaction.followup.send("❌ Action cancelled.", ephemeral=True)
 
-# Manual mute tracked as case
-@bot.command(name='mute')
-@commands.has_permissions(manage_roles=True)
-async def mute_cmd(ctx, member: discord.Member, *, reason: str = "No reason provided"):
-    mute_role = discord.utils.get(ctx.guild.roles, name="Muted")
+@bot.tree.command(name="mute", description="Mute a member and track it as a case.")
+async def mute_cmd(interaction: discord.Interaction, member: discord.Member, reason: str = "No reason provided"):
+    if not interaction.user.guild_permissions.manage_roles:
+        return await interaction.response.send_message("❌ You don’t have permission.", ephemeral=True)
+    mute_role = discord.utils.get(interaction.guild.roles, name="Muted")
     if not mute_role:
-        return await ctx.send("⚠️ No 'Muted' role found on this server.")
+        return await interaction.response.send_message("⚠️ No 'Muted' role found on this server.")
     try:
         await member.add_roles(mute_role)
     except Exception:
         pass
     try:
-        case_id = await add_case(ctx.guild.id, member.id, ctx.author.id, "Mute", reason)
+        case_id = await add_case(interaction.guild.id, member.id, interaction.user.id, "Mute", reason)
     except Exception:
-        await ctx.send("⚠️ Unable to save case to database.")
+        await interaction.response.send_message("⚠️ Unable to save case to database.")
         return
-    counts = await get_case_counts(ctx.guild.id, member.id)
-    await ctx.send(f"🤐 Muted {member.mention} | Case #{case_id} | Reason: {reason}\nWarned: {counts['Warn']} | Muted: {counts['Mute']} | Kicked: {counts['Kick']} | Banned: {counts['Ban']}")
-    await log_command(ctx, f"Muted {member} | Case #{case_id} | Reason: {reason}", discord.Color.orange())
+    counts = await get_case_counts(interaction.guild.id, member.id)
+    await interaction.response.send_message(f"🤐 Muted {member.mention} | Case #{case_id} | Reason: {reason}\nWarned: {counts['Warn']} | Muted: {counts['Mute']} | Kicked: {counts['Kick']} | Banned: {counts['Ban']}")
+    await log_command(interaction, f"Muted {member} | Case #{case_id} | Reason: {reason}", discord.Color.orange())
 
-# Kick / Ban (tracked)
-@bot.command(name='kick')
-@commands.has_permissions(kick_members=True)
-async def kick_cmd(ctx, member: discord.Member, *, reason: str = "No reason provided"):
+@bot.tree.command(name="kick", description="Kick a member and track as a case.")
+async def kick_cmd(interaction: discord.Interaction, member: discord.Member, reason: str = "No reason provided"):
+    if not interaction.user.guild_permissions.kick_members:
+        return await interaction.response.send_message("❌ You don’t have permission.", ephemeral=True)
     try:
         await member.kick(reason=reason)
     except Exception:
         pass
     try:
-        case_id = await add_case(ctx.guild.id, member.id, ctx.author.id, "Kick", reason)
+        case_id = await add_case(interaction.guild.id, member.id, interaction.user.id, "Kick", reason)
     except Exception:
-        await ctx.send("⚠️ Unable to save case to database.")
+        await interaction.response.send_message("⚠️ Unable to save case to database.")
         return
-    await ctx.send(f"👢 Kicked {member.mention} | Case #{case_id} | Reason: {reason}")
-    await log_command(ctx, f"Kicked {member} | Case #{case_id} | Reason: {reason}", discord.Color.red())
+    await interaction.response.send_message(f"👢 Kicked {member.mention} | Case #{case_id} | Reason: {reason}")
+    await log_command(interaction, f"Kicked {member} | Case #{case_id} | Reason: {reason}", discord.Color.red())
 
-@bot.command(name='ban')
-@commands.has_permissions(ban_members=True)
-async def ban_cmd(ctx, member: discord.Member, *, reason: str = "No reason provided"):
+@bot.tree.command(name="ban", description="Ban a member and track as a case.")
+async def ban_cmd(interaction: discord.Interaction, member: discord.Member, reason: str = "No reason provided"):
+    if not interaction.user.guild_permissions.ban_members:
+        return await interaction.response.send_message("❌ You don’t have permission.", ephemeral=True)
     try:
         await member.ban(reason=reason)
     except Exception:
         pass
     try:
-        case_id = await add_case(ctx.guild.id, member.id, ctx.author.id, "Ban", reason)
+        case_id = await add_case(interaction.guild.id, member.id, interaction.user.id, "Ban", reason)
     except Exception:
-        await ctx.send("⚠️ Unable to save case to database.")
+        await interaction.response.send_message("⚠️ Unable to save case to database.")
         return
-    await ctx.send(f"🔨 Banned {member.mention} | Case #{case_id} | Reason: {reason}")
-    await log_command(ctx, f"Banned {member} | Case #{case_id} | Reason: {reason}", discord.Color.red())
-
+    await interaction.response.send_message(f"🔨 Banned {member.mention} | Case #{case_id} | Reason: {reason}")
+    await log_command(interaction, f"Banned {member} | Case #{case_id} | Reason: {reason}", discord.Color.red())
+    
 # =========================
 # Utility commands
 # =========================
@@ -1306,6 +1284,7 @@ async def on_ready():
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
