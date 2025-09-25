@@ -57,20 +57,21 @@ async def init_db():
 # =========================
 # CASES TABLE (for slash commands)
 # =========================
-async with aiosqlite.connect("bot.db") as conn:
-    await conn.execute('''
-        CREATE TABLE IF NOT EXISTS cases (
-            case_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            moderator_id INTEGER NOT NULL,
-            action TEXT NOT NULL,
-            reason TEXT,
-            timestamp TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    await conn.commit()
-    
+async def setup_cases_table():
+    async with aiosqlite.connect("bot.db") as conn:
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS cases (
+                case_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                moderator_id INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                reason TEXT,
+                timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        await conn.commit()
+        
   # =========================
   # ANTINUKE SETTINGS
   # =========================
@@ -1287,6 +1288,7 @@ async def on_ready():
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
