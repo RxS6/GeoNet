@@ -115,30 +115,6 @@ async def get_case_counts(guild_id: int, user_id: int):
             return counts
 
 # =========================
-# DATABASE SETUP FOR ANTINUKE
-# =========================
-async def setup_antinuke_tables():
-    async with aiosqlite.connect("bot.db") as db:
-        # Table 1: Anti-Nuke status (per guild)
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS antinuke (
-                guild_id INTEGER PRIMARY KEY,
-                enabled INTEGER NOT NULL DEFAULT 0
-            )
-        ''')
-
-        # Table 2: Whitelist (per guild)
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS antinuke_whitelist (
-                guild_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL,
-                UNIQUE(guild_id, user_id)
-            )
-        ''')
-
-        await db.commit()
-            
-# =========================
 # BOT setup
 # =========================
 intents = discord.Intents.all()
@@ -1338,6 +1314,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
