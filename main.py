@@ -53,24 +53,27 @@ async def init_db():
     # Ensure DB file is valid (or removed) before using aiosqlite
     ensure_db_file()
     async with aiosqlite.connect(DB_PATH) as conn:
-        # =========================
-        # CASES TABLE
-        # =========================
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS cases (
-                case_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                guild_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL,
-                moderator_id INTEGER NOT NULL,
-                action TEXT NOT NULL,
-                reason TEXT,
-                timestamp TEXT
-            )
-        ''')
-
-        # =========================
-        # ANTINUKE SETTINGS
-        # =========================
+        
+# =========================
+# CASES TABLE (for slash commands)
+# =========================
+async with aiosqlite.connect("bot.db") as conn:
+    await conn.execute('''
+        CREATE TABLE IF NOT EXISTS cases (
+            case_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            moderator_id INTEGER NOT NULL,
+            action TEXT NOT NULL,
+            reason TEXT,
+            timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    await conn.commit()
+    
+  # =========================
+  # ANTINUKE SETTINGS
+  # =========================
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS antinuke (
                 guild_id INTEGER PRIMARY KEY,
@@ -1284,6 +1287,7 @@ async def on_ready():
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
