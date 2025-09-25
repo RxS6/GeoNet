@@ -19,6 +19,9 @@ log_channel_id = 1418641633750159493
 staff_role1_id = 1418641632236011662
 staff_role2_id = 1418641632148066431
 autorole_id = 1418641632059850878
+ANTINUKE_ROLE_ID = 1418641632236011669
+LOG_CHANNEL_ID = 1418641633750159493
+WHITELIST_ROLE_ID = 1418641632236011667
 
 # storage for ephemeral features
 removed_roles = {}            # for rape/recover command
@@ -110,6 +113,30 @@ async def get_case_counts(guild_id: int, user_id: int):
                 if action in counts:
                     counts[action] = cnt
             return counts
+
+# =========================
+# DATABASE SETUP FOR ANTINUKE
+# =========================
+async def setup_antinuke_tables():
+    async with aiosqlite.connect("bot.db") as db:
+        # Table 1: Anti-Nuke status (per guild)
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS antinuke (
+                guild_id INTEGER PRIMARY KEY,
+                enabled INTEGER NOT NULL DEFAULT 0
+            )
+        ''')
+
+        # Table 2: Whitelist (per guild)
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS antinuke_whitelist (
+                guild_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                UNIQUE(guild_id, user_id)
+            )
+        ''')
+
+        await db.commit()
             
 # =========================
 # BOT setup
@@ -492,7 +519,194 @@ async def on_message(message):
         await send_log(message.guild, embed)
 
     await bot.process_commands(message)
-    
+
+
+# =========================
+# DATABASE SETUP
+# =========================
+async with aiosqlite.connect("bot.db") as db:
+    await db.execute('''
+        CREATE TABLE IF NOT EXISTS antinuke (
+            guild_id INTEGER PRIMARY KEY,
+            enabled INTEGER DEFAULT 0
+        )
+    ''')
+    await db.execute('''
+        CREATE TABLE IF NOT EXISTS antinuke_whitelist (
+            guild_id INTEGER,
+            user_id INTEGER,
+            PRIMARY KEY (guild_id, user_id)
+        )
+    ''')
+    await db.execute('''
+        CREATE TABLE IF NOT EXISTS antinuke_logs (
+            guild_id INTEGER PRIMARY KEY,
+            channel_id INTEGER
+        )
+    ''')
+    await db.execute('''
+        CREATE TABLE IF NOT EXISTS cases (
+            case_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            moderator_id INTEGER NOT NULL,
+            action TEXT NOT NULL,
+            reason TEXT,
+            timestamp TEXT
+        )
+    ''')
+    await db.execute('''
+        CREATE TABLE IF NOT EXISTS deleted_messages (
+            guild_id INTEGER,
+            channel_id INTEGER,
+            message_id INTEGER,
+            author_id INTEGER,
+            content TEXT,
+            attachments TEXT,
+            timestamp TEXT
+        )
+    ''')
+    await db.commit()
+
+# =========================
+# ENABLE / DISABLE / STATUS
+# =========================
+@bot.command(name="antinuke-enable")
+async def antinuke_enable(ctx):
+    if ANTINUKE_ROLE_ID not in [r.id for r in ctx.author.roles]:
+        return await ctx.send("❌ You don’t have permission")
+    async with aiosqlite.connect("bot.db") as db:
+        await db.execute("INSERT OR REPLACE INTO antinuke (guild_id, enabled) VALUES (?, ?)", (ctx.guild.id, 1))
+        await db.commit()
+    await ctx.send("✅ Anti-Nuke enabled")
+
+@bot.command(name="antinuke-disable")
+async def antinuke_disable(ctx):
+    if ANTINUKE_ROLE_ID not in [r.id for r in ctx.author.roles]:
+        return await ctx.send("❌ You don’t have permission")
+    async with aiosqlite.connect("bot.db") as db:
+        await db.execute("INSERT OR REPLACE INTO antinuke (guild_id, enabled) VALUES (?, ?)", (ctx.guild.id, 0))
+        await db.commit()
+    await ctx.send("⚠️ Anti-Nuke disabled")
+
+@bot.command(name="antinuke-status")
+async def antinuke_status(ctx):
+    enabled = await is_enabled(ctx.guild.id)
+    status = "🟢 Enabled" if enabled else "🔴 Disabled"
+    await ctx.send(f"📊 Anti-Nuke Status: {status}")
+
+# =========================
+# WHITELIST MANAGEMENT
+# =========================
+@bot.command(name="antinuke-whitelist-add")
+async def whitelist_add(ctx, user: discord.Member):
+    if ANTINUKE_ROLE_ID not in [r.id for r in ctx.author.roles]:
+        return await ctx.send("❌ No permission")
+    async with aiosqlite.connect("bot.db") as db:
+        await db.execute("INSERT OR IGNORE INTO antinuke_whitelist (guild_id, user_id) VALUES (?, ?)", (ctx.guild.id, user.id))
+        await db.commit()
+    await ctx.send(f"✅ {user.mention} added to whitelist")
+
+@bot.command(name="antinuke-whitelist-remove")
+async def whitelist_remove(ctx, user: discord.Member):
+    if ANTINUKE_ROLE_ID not in [r.id for r in ctx.author.roles]:
+        return await ctx.send("❌ No permission")
+    async with aiosqlite.connect("bot.db") as db:
+        await db.execute("DELETE FROM antinuke_whitelist WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, user.id))
+        await db.commit()
+    await ctx.send(f"✅ {user.mention} removed from whitelist")
+
+@bot.command(name="antinuke-whitelist-list")
+async def whitelist_list(ctx):
+    async with aiosqlite.connect("bot.db") as db:
+        cursor = await db.execute("SELECT user_id FROM antinuke_whitelist WHERE guild_id = ?", (ctx.guild.id,))
+        rows = await cursor.fetchall()
+    if not rows: return await ctx.send("❌ No whitelisted users")
+    mentions = [ctx.guild.get_member(r[0]).mention if ctx.guild.get_member(r[0]) else f"User ID {r[0]}" for r in rows]
+    await ctx.send("📋 Whitelisted Users:\n" + "\n".join(mentions))
+
+# =========================
+# EVENT LISTENERS
+# =========================
+@bot.event
+async def on_guild_role_delete(role):
+    if not await is_enabled(role.guild.id): return
+    if await is_whitelisted(role.guild.id, role.guild.owner_id): return
+    await role.guild.create_role(name=role.name, permissions=role.permissions, colour=role.color,
+                                 hoist=role.hoist, mentionable=role.mentionable, reason="Anti-Nuke: Role Restore")
+    await log_event(role.guild, f"Role {role.name} deleted and restored")
+
+@bot.event
+async def on_guild_channel_delete(channel):
+    if not await is_enabled(channel.guild.id): return
+    overwrites = channel.overwrites
+    await channel.guild.create_text_channel(name=channel.name, overwrites=overwrites, category=channel.category,
+                                            reason="Anti-Nuke: Channel Restore")
+    await log_event(channel.guild, f"Channel {channel.name} deleted and restored")
+
+@bot.event
+async def on_guild_emojis_update(guild, before, after):
+    if not await is_enabled(guild.id): return
+    before_names = [e.name for e in before]
+    after_names = [e.name for e in after]
+    deleted = [e for e in before if e.name not in after_names]
+    for e in deleted:
+        await guild.create_custom_emoji(name=e.name, image=await e.url.read(), reason="Anti-Nuke: Emoji Restore")
+        await log_event(guild, f"Emoji {e.name} deleted and restored")
+
+@bot.event
+async def on_webhooks_update(channel):
+    if not await is_enabled(channel.guild.id): return
+    await log_event(channel.guild, f"Webhook change detected in {channel.name}")
+
+@bot.event
+async def on_guild_role_update(before, after):
+    if not await is_enabled(before.guild.id): return
+    await after.edit(permissions=before.permissions, reason="Anti-Nuke: Role Permissions Restore")
+    await log_event(before.guild, f"Role {after.name} permissions reverted")
+
+@bot.event
+async def on_guild_channel_update(before, after):
+    if not await is_enabled(before.guild.id): return
+    await after.edit(overwrites=before.overwrites, name=before.name, category=before.category,
+                     topic=getattr(before, "topic", None), reason="Anti-Nuke: Channel Overwrites Revert")
+    await log_event(before.guild, f"Channel {after.name} reverted")
+
+@bot.event
+async def on_message_delete(message):
+    if not await is_enabled(message.guild.id): return
+    async with aiosqlite.connect("bot.db") as db:
+        await db.execute("INSERT INTO deleted_messages (guild_id, channel_id, message_id, author_id, content, attachments, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                         (message.guild.id, message.channel.id, message.id, message.author.id, message.content, ",".join([a.url for a in message.attachments]), str(message.created_at)))
+        await db.commit()
+    await log_event(message.guild, f"Message deleted in {message.channel.name} stored for recovery")
+
+# =========================
+# LOGGING
+# =========================
+async def log_event(guild, message):
+    async with aiosqlite.connect("bot.db") as db:
+        cursor = await db.execute("SELECT channel_id FROM antinuke_logs WHERE guild_id = ?", (guild.id,))
+        row = await cursor.fetchone()
+    if row:
+        ch = guild.get_channel(row[0])
+        if ch: await ch.send(f"🛡️ {message}")
+
+# =========================
+# HELPERS
+# =========================
+async def is_enabled(guild_id):
+    async with aiosqlite.connect("bot.db") as db:
+        cursor = await db.execute("SELECT enabled FROM antinuke WHERE guild_id = ?", (guild_id,))
+        row = await cursor.fetchone()
+    return bool(row[0]) if row else False
+
+async def is_whitelisted(guild_id, user_id):
+    async with aiosqlite.connect("bot.db") as db:
+        cursor = await db.execute("SELECT 1 FROM antinuke_whitelist WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
+        row = await cursor.fetchone()
+    return bool(row)
+
 # =========================
 # STAFF / FUN commands (trial, permdemote, rape/recover)
 # =========================
@@ -1124,6 +1338,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
