@@ -1007,74 +1007,123 @@ async def suggestlist(ctx, status: str = "Pending"):
     await ctx.send(embed=pages[0], view=view)
     
 # =========================
-# Help
+# 📜 Help Command v10.1 (Dropdown Menu + Emojis + Staff Badge)
 # =========================
+
+# Role IDs
+ROLES = {
+    "full_staff": 1418641632148066433,
+    "mute_only": 1418641632148066431,
+    "kick_mute": 1418641632148066432,
+    "rape_recover": [1418641632236011665, 1418641632236011667, 1418641632236011669],
+    "trial": 1418641632236011665,
+    "antinuke": 1418641632236011669
+}
+
 @bot.command()
 async def help(ctx):
-    categories = {
-        "Moderation": [
+    user_roles = [r.id for r in ctx.author.roles]
+
+    categories = {}
+
+    # Staff-only: Moderation
+    moderation_cmds = []
+    if ROLES["full_staff"] in user_roles or ROLES["kick_mute"] in user_roles:
+        moderation_cmds.extend([
             "`$ban @user [reason]` - Ban a user",
-            "`$kick @user [reason]` - Kick a user",
-            "`$mute @user [time]` - Mute a user",
+            "`$kick @user [reason]` - Kick a user"
+        ])
+    if ROLES["full_staff"] in user_roles or ROLES["mute_only"] in user_roles or ROLES["kick_mute"] in user_roles:
+        moderation_cmds.append("`$mute @user [time]` - Mute a user")
+    if ROLES["full_staff"] in user_roles:
+        moderation_cmds.extend([
             "`$unmute @user` - Unmute a user",
             "`$warn @user [reason]` - Warn a user",
-            "`$warnings @user` - View warnings",
             "`$unwarn <case_id>` - Remove a warning",
-            "`$permdemote @user` - Permanent demotion",
-            "`$trial @user` - Add trial staff roles",
+            "`$permdemote @user` - Permanent demotion"
+        ])
+    if any(role in user_roles for role in ROLES["rape_recover"]):
+        moderation_cmds.extend([
             "`$rape @user` - Remove all roles",
-            "`$recover @user` - Restore removed roles",
-        ],
-        "Utility": [
-            "`$userinfo @user` - Information about a user",
-            "`$serverinfo` - Information about the server",
-            "`$addrole @user @role` - Add role",
-            "`$removerole @user @role` - Remove role",
-            "`$purge [amount]` - Delete messages",
-            "`$lock` / `$unlock` - Lock or unlock channel",
-        ]
-    }
+            "`$recover @user` - Restore removed roles"
+        ])
+    if ROLES["trial"] in user_roles:
+        moderation_cmds.append("`$trial @user` - Add trial staff roles")
 
-    pages = []
-    for category, commands_list in categories.items():
+    if moderation_cmds:
+        categories["🛡️ Moderation (Staff Only)"] = moderation_cmds
+
+    # Utility
+    categories["⚙️ Utility"] = [
+        "`$userinfo @user` - View info about a user",
+        "`$serverinfo` - View server info",
+        "`$addrole @user @role` - Add role",
+        "`$removerole @user @role` - Remove role",
+        "`$purge [amount]` - Delete messages",
+        "`$lock` / `$unlock` - Lock or unlock a channel"
+    ]
+
+    # Security
+    security_cmds = []
+    if ROLES["antinuke"] in user_roles:
+        security_cmds.extend([
+            "`$antinuke` - Enable anti-nuke protection",
+            "`$disableantinuke` - Disable anti-nuke protection"
+        ])
+    if security_cmds:
+        categories["🛡️ Security (Staff Only)"] = security_cmds
+
+    # Management
+    management_cmds = []
+    if ROLES["full_staff"] in user_roles:
+        management_cmds.extend([
+            "`$setprefix <prefix>` - Change bot prefix",
+            "`$settings` - View server settings"
+        ])
+    if management_cmds:
+        categories["📊 Management (Staff Only)"] = management_cmds
+
+    # -----------------
+    # Create embeds per category
+    # -----------------
+    embeds = {}
+    for cat, cmds in categories.items():
         embed = discord.Embed(
-            title=f"Help — {category}",
-            description="\n".join(commands_list),
+            title=f"Help — {cat}",
+            description="\n".join(cmds),
             color=discord.Color.blurple()
         )
         embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
-        pages.append(embed)
+        embeds[cat] = embed
 
-    class HelpView(View):
+    # -----------------
+    # Dropdown menu view with emojis
+    # -----------------
+    class HelpDropdown(View):
         def __init__(self):
-            super().__init__(timeout=60)
-            self.current_page = 0
+            super().__init__(timeout=120)
+            options = [
+                discord.SelectOption(label=cat, description=f"View {cat} commands", emoji=cat.split(" ")[0])
+                for cat in categories.keys()
+            ]
+            self.select = Select(placeholder="Select a category...", options=options)
+            self.select.callback = self.callback
+            self.add_item(self.select)
 
-        async def update_page(self, interaction):
-            await interaction.response.edit_message(embed=pages[self.current_page], view=self)
+        async def callback(self, interaction: discord.Interaction):
+            selected = self.select.values[0]
+            await interaction.response.edit_message(embed=embeds[selected], view=self)
 
-        @discord.ui.button(label="←", style=discord.ButtonStyle.secondary)
-        async def previous(self, interaction: discord.Interaction, button: Button):
-            self.current_page = (self.current_page - 1) % len(pages)
-            await self.update_page(interaction)
-
-        @discord.ui.button(label="→", style=discord.ButtonStyle.secondary)
-        async def next(self, interaction: discord.Interaction, button: Button):
-            self.current_page = (self.current_page + 1) % len(pages)
-            await self.update_page(interaction)
-
-        @discord.ui.button(label="Close", style=discord.ButtonStyle.danger)
-        async def close(self, interaction: discord.Interaction, button: Button):
-            await interaction.message.delete()
-
-    view = HelpView()
-    await ctx.send(embed=pages[0], view=view)
+    view = HelpDropdown()
+    first_category = list(categories.keys())[0]
+    await ctx.send(embed=embeds[first_category], view=view)
 
 # =========================
 # Run
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
