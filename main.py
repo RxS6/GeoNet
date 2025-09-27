@@ -501,8 +501,8 @@ async def on_message(message):
 # =========================
 async def setup_database():
     async with aiosqlite.connect("bot.db") as db:
-    await db.execute('''
-        CREATE TABLE IF NOT EXISTS antinuke (
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS antinuke (
             guild_id INTEGER PRIMARY KEY,
             enabled INTEGER DEFAULT 0
         )
@@ -1314,6 +1314,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
