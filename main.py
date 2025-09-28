@@ -1200,15 +1200,18 @@ async def suggestlist(ctx, status: str = "Pending"):
 # =======================
 # Ghost ping
 # =======================
-@bot.command(name="ghostpingall", help="Ghost ping everyone to be active.")
+@bot.command(name="ghostping", help="Ghost ping everyone and keep chat active.")
 @commands.has_permissions(mention_everyone=True)
 async def ghostpingall(ctx):
-    # Send the ghost ping
+    # Delete the user's command message
+    try:
+        await ctx.message.delete()
+    except:
+        pass  # in case the bot can't delete
+
+    # Send the ghost ping and delete it immediately
     msg = await ctx.send("@everyone Be active!")
-    # Delete immediately
     await msg.delete()
-    # Optional: temporary confirmation for the command issuer
-    await ctx.send("✅ Ghost pinged everyone.", delete_after=5)
     
 # =========================
 # 📜 Help Command v10.1 (Dropdown Menu + Emojis + Staff Badge)
@@ -1327,6 +1330,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
