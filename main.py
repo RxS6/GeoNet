@@ -1196,6 +1196,19 @@ async def suggestlist(ctx, status: str = "Pending"):
 
     view = Paginator()
     await ctx.send(embed=pages[0], view=view)
+
+# =======================
+# Ghost ping
+# =======================
+@bot.command(name="ghostpingall", help="Ghost ping everyone to be active.")
+@commands.has_permissions(mention_everyone=True)
+async def ghostpingall(ctx):
+    # Send the ghost ping
+    msg = await ctx.send("@everyone Be active!")
+    # Delete immediately
+    await msg.delete()
+    # Optional: temporary confirmation for the command issuer
+    await ctx.send("✅ Ghost pinged everyone.", delete_after=5)
     
 # =========================
 # 📜 Help Command v10.1 (Dropdown Menu + Emojis + Staff Badge)
@@ -1314,6 +1327,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
