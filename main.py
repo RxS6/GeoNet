@@ -119,9 +119,9 @@ async def get_case_counts(guild_id: int, user_id: int):
 # =========================
 intents = discord.Intents.all()
 
-# multiple prefixes ($ and !), plus mention
+# multiple prefixes ($ and /), plus mention
 bot = commands.Bot(
-    command_prefix=commands.when_mentioned_or("$", "/"),
+    command_prefix=commands.when_mentioned_or("$"),
     intents=intents
 )
 
@@ -134,9 +134,8 @@ except Exception:
 @bot.event
 async def on_ready():
     # ensure DB and tables exist (and recreate if needed)
-    await init_db()
+    await setup_database()  # <- yahan DB setup call kiya
     print(f'✅ Logged in as {bot.user} ({bot.user.id})')
-
     
 # =========================
 # Autorole
@@ -545,12 +544,8 @@ async def setup_database():
 
 # =========================
 # PROFESSIONAL ANTI-NUKE v2
-# DATABASE + COMMANDS
+# DATABASE SETUP (UPDATED)
 # =========================
-
-# -------------------------
-# DATABASE SETUP
-# -------------------------
 async def setup_database():
     async with aiosqlite.connect("bot.db") as db:
         # Anti-Nuke main table
@@ -587,7 +582,7 @@ async def setup_database():
                 timestamp TEXT
             )
         """)
-        # Case tracking
+        # Case tracking for moderation
         await db.execute("""
             CREATE TABLE IF NOT EXISTS cases (
                 case_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1357,6 +1352,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
