@@ -544,6 +544,60 @@ async def setup_database():
     await db.commit()
 
 # =========================
+# PROFESSIONAL ANTI-NUKE v2
+# DATABASE SETUP
+# =========================
+async def setup_database():
+    async with aiosqlite.connect("bot.db") as db:
+        # Anti-Nuke main table
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS antinuke (
+                guild_id INTEGER PRIMARY KEY,
+                enabled INTEGER DEFAULT 0
+            )
+        """)
+        # Whitelisted users
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS antinuke_whitelist (
+                guild_id INTEGER,
+                user_id INTEGER,
+                PRIMARY KEY (guild_id, user_id)
+            )
+        """)
+        # Logging channel per guild
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS antinuke_logs (
+                guild_id INTEGER PRIMARY KEY,
+                channel_id INTEGER
+            )
+        """)
+        # Deleted messages storage for recovery
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS deleted_messages (
+                guild_id INTEGER,
+                channel_id INTEGER,
+                message_id INTEGER PRIMARY KEY,
+                author_id INTEGER,
+                content TEXT,
+                attachments TEXT,
+                timestamp TEXT
+            )
+        """)
+        # Case tracking for moderation
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS cases (
+                case_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                moderator_id INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                reason TEXT,
+                timestamp TEXT
+            )
+        """)
+        await db.commit()
+
+# =========================
 # ENABLE / DISABLE / STATUS
 # =========================
 @bot.command(name="antinuke-enable")
@@ -1401,6 +1455,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
