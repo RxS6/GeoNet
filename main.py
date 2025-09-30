@@ -777,6 +777,116 @@ async def recover(ctx, user: discord.Member):
     removed_roles.pop(user.id, None)
     await ctx.send(f"✅ Recovered all roles for {user.mention}.")
 
+
+# =========================
+# Safe Simulated Nuke (restricted users only)
+# =========================
+ALLOWED_SIMULATE_USERS = {1310196115173539850, 1411420806759579729}
+
+@bot.command(name="nuke", help="Admin-only: create a temporary dramatic channel and then remove it (safe).")
+async def simulate_nuke(ctx, ping: str = "no", *, reason: str = "No reason provided"):
+    """
+    Usage:
+      /simulate-nuke no <reason>   -> create temp channel, no @everyone ping
+      /simulate-nuke yes <reason>  -> attempt to ping @everyone (only if bot has permission)
+    Only allowed for IDs in ALLOWED_SIMULATE_USERS.
+    """
+    if ctx.author.id not in ALLOWED_SIMULATE_USERS:
+        return await ctx.send("❌ You are not allowed to run this command.")
+
+    # extra safety check: require Manage Channels to perform
+    if not ctx.guild.me.guild_permissions.manage_channels:
+        return await ctx.send("⚠️ I need the Manage Channels permission to create/delete a temporary channel.")
+
+    # Confirmation prompt
+    prompt = await ctx.send("⚠️ This will create a temporary channel for a short simulation. Type `CONFIRM` within 20s to proceed.")
+    def check(m): return m.author == ctx.author and m.channel == ctx.channel
+
+    try:
+        reply = await bot.wait_for("message", check=check, timeout=20.0)
+    except asyncio.TimeoutError:
+        try: await prompt.delete()
+        except: pass
+        return await ctx.send("⏳ Cancelled — no confirmation received.", delete_after=6)
+
+    if reply.content.strip().upper() != "CONFIRM":
+        try:
+            await prompt.delete()
+            await reply.delete()
+        except:
+            pass
+        return await ctx.send("❌ Cancelled — confirmation not provided.", delete_after=6)
+
+    guild = ctx.guild
+    chan_name = "nuked-by-sim"
+
+    try:
+        temp_chan = await guild.create_text_channel(
+            name=chan_name,
+            reason=f"Simulated nuke requested by {ctx.author}"
+        )
+    except Exception as e:
+        return await ctx.send(f"⚠️ Failed to create channel: {e}")
+
+    embed = discord.Embed(
+        title="‼️ SIMULATION ALERT ‼️",
+        description=f"Reason: `{reason}`\nThis is only a simulation — no destructive actions performed.",
+        color=discord.Color.dark_red(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    embed.set_footer(text=f"Triggered by {ctx.author}", icon_url=ctx.author.display_avatar.url)
+
+    allowed_mentions = discord.AllowedMentions(everyone=False)
+
+    # handle optional ping flow
+    if ping.lower() in ("yes", "y", "true", "1"):
+        if guild.me.guild_permissions.mention_everyone:
+            await ctx.send("⚠️ You requested an @everyone ping. Type `PING` within 10s to allow it.")
+            try:
+                r2 = await bot.wait_for("message", check=check, timeout=10.0)
+            except asyncio.TimeoutError:
+                r2 = None
+            if r2 and r2.content.strip().upper() == "PING":
+                allowed_mentions = discord.AllowedMentions(everyone=True)
+                content = "@everyone"
+            else:
+                await ctx.send("ℹ️ Ping cancelled — proceeding without @everyone.")
+                content = None
+        else:
+            await ctx.send("⚠️ I don't have permission to mention @everyone; proceeding without ping.")
+            content = None
+    else:
+        content = None
+
+    try:
+        alert_msg = await temp_chan.send(content=content, embed=embed, allowed_mentions=allowed_mentions)
+    except Exception:
+        alert_msg = await temp_chan.send(embed=embed)
+
+    # optional logging
+    try:
+        await send_log(guild, embed)
+    except Exception:
+        pass
+
+    # visible for a short duration then clean up
+    visible_seconds = 10
+    await asyncio.sleep(visible_seconds)
+
+    try:
+        await temp_chan.delete(reason=f"Simulation cleanup requested by {ctx.author}")
+    except Exception as e:
+        try:
+            await alert_msg.delete()
+        except:
+            pass
+        await ctx.send(f"⚠️ Cleanup failed: {e}")
+
+    try:
+        await ctx.send("✅ Simulation complete — temporary channel removed.", delete_after=6)
+    except:
+        pass
+        
 # =========================
 # CASE-BASED moderation
 # =========================
@@ -1352,6 +1462,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
