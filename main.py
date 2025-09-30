@@ -778,112 +778,169 @@ async def recover(ctx, user: discord.Member):
     await ctx.send(f"✅ Recovered all roles for {user.mention}.")
 
 
-# =========================
-# Safe Simulated Nuke (restricted users only)
-# =========================
-ALLOWED_SIMULATE_USERS = {1310196115173539850, 1411420806759579729}
+# Required imports (add if you don't already have them)
+import asyncio
+from datetime import datetime, timezone
 
-@bot.command(name="nuke", help="Admin-only: create a temporary dramatic channel and then remove it (safe).")
-async def simulate_nuke(ctx, ping: str = "no", *, reason: str = "No reason provided"):
+# ---------------- CONFIG: edit these ----------------
+ALLOWED_SIMULATE_USERS = {1310196115173539850, 1411420806759579729}
+TEST_GUILD_ID = 1418641631971643473  # <-- put your private test server ID here
+MAX_REPEATS = 100       # <-- safe default. Change to 100 ONLY if you understand the risk AND use TEST_GUILD_ID
+MAX_CHANNELS = 500       # max number of temp channels to create in one run
+GUILD_COOLDOWN_SECONDS = 600  # cooldown per guild to avoid repeated runs
+VISIBLE_SECONDS = 15    # how long each temp channel stays visible before deletion
+# ---------------------------------------------------
+
+from discord.ext.commands import BucketType, cooldown
+
+# ---------------- massping command ---------------- #
+@bot.command(name="massping", help="(TEST ONLY) Create temporary channels, send announcement (role/everyone), then delete them.")
+@cooldown(1, GUILD_COOLDOWN_SECONDS, BucketType.guild)
+async def massping(ctx, target: str = "everyone", repeats: int = 1, *, reason: str = "No reason provided"):
     """
-    Usage:
-      /simulate-nuke no <reason>   -> create temp channel, no @everyone ping
-      /simulate-nuke yes <reason>  -> attempt to ping @everyone (only if bot has permission)
-    Only allowed for IDs in ALLOWED_SIMULATE_USERS.
+    Usage examples:
+      !massping everyone 1 <reason>
+      !massping @TestRole 2 <reason>
+    Notes / protections:
+      - Only users in ALLOWED_SIMULATE_USERS can run it.
+      - Only works in TEST_GUILD_ID.
+      - repeats and created channels are capped by MAX_REPEATS / MAX_CHANNELS.
     """
+
+    # Basic permission guard
     if ctx.author.id not in ALLOWED_SIMULATE_USERS:
         return await ctx.send("❌ You are not allowed to run this command.")
 
-    # extra safety check: require Manage Channels to perform
-    if not ctx.guild.me.guild_permissions.manage_channels:
-        return await ctx.send("⚠️ I need the Manage Channels permission to create/delete a temporary channel.")
+    if ctx.guild is None:
+        return await ctx.send("❌ Use this command in a server.")
 
-    # Confirmation prompt
-    prompt = await ctx.send("⚠️ This will create a temporary channel for a short simulation. Type `CONFIRM` within 20s to proceed.")
+    # Restrict to test guild
+    if ctx.guild.id != TEST_GUILD_ID:
+        return await ctx.send("❌ This command only runs in the configured test server.")
+
+    # Validate repeats and cap
+    if repeats < 1:
+        return await ctx.send("❌ repeats must be >= 1.")
+    if repeats > MAX_REPEATS:
+        return await ctx.send(f"❌ repeats capped at {MAX_REPEATS}. Reduce repeats or change MAX_REPEATS in config (only for test servers).")
+
+    # Cap how many channels we'll create (safety)
+    to_create = min(repeats, MAX_CHANNELS)
+
+    # Find role if mentioned
+    role = None
+    if ctx.message.role_mentions:
+        role = ctx.message.role_mentions[0]
+
+    # Build embed content
+    embed = discord.Embed(
+        title="📣 TEST ANNOUNCEMENT",
+        description=f"Reason: `{reason}`\nTriggered by {ctx.author.mention}",
+        color=discord.Color.orange(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    embed.set_footer(text="Test massping — channels will be removed automatically")
+
+    # Confirm action with user before proceeding (prevents accidental runs)
+    confirm_prompt = await ctx.send(
+        f"⚠️ You are about to create **{to_create}** temporary channel(s) and send `{target}` announcements. Type `CONFIRM` within 20s to proceed."
+    )
+
     def check(m): return m.author == ctx.author and m.channel == ctx.channel
-
     try:
-        reply = await bot.wait_for("message", check=check, timeout=20.0)
+        confirm_msg = await bot.wait_for("message", check=check, timeout=20.0)
     except asyncio.TimeoutError:
-        try: await prompt.delete()
+        try: await confirm_prompt.delete()
         except: pass
         return await ctx.send("⏳ Cancelled — no confirmation received.", delete_after=6)
 
-    if reply.content.strip().upper() != "CONFIRM":
+    if confirm_msg.content.strip().upper() != "CONFIRM":
         try:
-            await prompt.delete()
-            await reply.delete()
-        except:
-            pass
+            await confirm_prompt.delete(); await confirm_msg.delete()
+        except: pass
         return await ctx.send("❌ Cancelled — confirmation not provided.", delete_after=6)
 
-    guild = ctx.guild
-    chan_name = "nuked-by-sim"
+    # Determine allowed mentions
+    allowed = discord.AllowedMentions(everyone=False, roles=False, users=False)
+    will_mention_everyone = False
+    mention_role = None
 
-    try:
-        temp_chan = await guild.create_text_channel(
-            name=chan_name,
-            reason=f"Simulated nuke requested by {ctx.author}"
-        )
-    except Exception as e:
-        return await ctx.send(f"⚠️ Failed to create channel: {e}")
-
-    embed = discord.Embed(
-        title="‼️ SIMULATION ALERT ‼️",
-        description=f"Reason: `{reason}`\nThis is only a simulation — no destructive actions performed.",
-        color=discord.Color.dark_red(),
-        timestamp=datetime.now(timezone.utc)
-    )
-    embed.set_footer(text=f"Triggered by {ctx.author}", icon_url=ctx.author.display_avatar.url)
-
-    allowed_mentions = discord.AllowedMentions(everyone=False)
-
-    # handle optional ping flow
-    if ping.lower() in ("yes", "y", "true", "1"):
-        if guild.me.guild_permissions.mention_everyone:
-            await ctx.send("⚠️ You requested an @everyone ping. Type `PING` within 10s to allow it.")
+    if role:
+        mention_role = role
+        allowed = discord.AllowedMentions(roles=True)
+    elif target.lower() in ("everyone", "@everyone", "all"):
+        # extra confirmation for @everyone
+        if not ctx.guild.me.guild_permissions.mention_everyone:
+            await ctx.send("⚠️ I don't have permission to mention @everyone; proceeding without mention.")
+        else:
+            # extra tiny prompt
+            await ctx.send("⚠️ You requested an @everyone mention. Type `PING` within 8s to allow it (or anything else to cancel).")
             try:
-                r2 = await bot.wait_for("message", check=check, timeout=10.0)
+                pmsg = await bot.wait_for("message", check=check, timeout=8.0)
             except asyncio.TimeoutError:
-                r2 = None
-            if r2 and r2.content.strip().upper() == "PING":
-                allowed_mentions = discord.AllowedMentions(everyone=True)
+                pmsg = None
+            if pmsg and pmsg.content.strip().upper() == "PING":
+                will_mention_everyone = True
+                allowed = discord.AllowedMentions(everyone=True)
+            else:
+                await ctx.send("ℹ️ Proceeding without @everyone mention.")
+    else:
+        # if target is a string that isn't role/everyone, treat as plain text announcement
+        pass
+
+    # Create temp channels, send announcement, then delete after VISIBLE_SECONDS
+    created = []
+    for i in range(1, to_create + 1):
+        chan_name = f"temp-announcement-{i}"
+        try:
+            temp_chan = await ctx.guild.create_text_channel(
+                name=chan_name,
+                reason=f"Massping test requested by {ctx.author}"
+            )
+            created.append(temp_chan)
+        except Exception as e:
+            await ctx.send(f"⚠️ Failed to create channel `{chan_name}`: {e}")
+            # continue to next (we won't abort entirely)
+
+    # Send messages
+    for idx, ch in enumerate(created, start=1):
+        try:
+            if mention_role:
+                content = mention_role.mention
+            elif will_mention_everyone:
                 content = "@everyone"
             else:
-                await ctx.send("ℹ️ Ping cancelled — proceeding without @everyone.")
                 content = None
-        else:
-            await ctx.send("⚠️ I don't have permission to mention @everyone; proceeding without ping.")
-            content = None
-    else:
-        content = None
 
-    try:
-        alert_msg = await temp_chan.send(content=content, embed=embed, allowed_mentions=allowed_mentions)
-    except Exception:
-        alert_msg = await temp_chan.send(embed=embed)
+            # Include embed for dramatic effect
+            await ch.send(content=content, embed=embed, allowed_mentions=allowed)
+        except Exception as e:
+            # ignore send errors but notify
+            await ctx.send(f"⚠️ Failed to send in {ch.mention}: {e}", delete_after=6)
 
-    # optional logging
+    # Optional logging channel hook (if you have send_log)
     try:
-        await send_log(guild, embed)
+        log_embed = discord.Embed(title="Massping test run", description=f"Run by {ctx.author} — created {len(created)} channels", color=discord.Color.blue(), timestamp=datetime.now(timezone.utc))
+        await send_log(ctx.guild, log_embed)
     except Exception:
         pass
 
-    # visible for a short duration then clean up
-    visible_seconds = 10
-    await asyncio.sleep(visible_seconds)
+    # Wait visible_seconds then delete created channels
+    await asyncio.sleep(VISIBLE_SECONDS)
 
-    try:
-        await temp_chan.delete(reason=f"Simulation cleanup requested by {ctx.author}")
-    except Exception as e:
+    for ch in created:
         try:
-            await alert_msg.delete()
-        except:
-            pass
-        await ctx.send(f"⚠️ Cleanup failed: {e}")
+            await ch.delete(reason=f"Cleanup after massping test by {ctx.author}")
+        except Exception as e:
+            # if delete fails, try to delete the message(s) inside instead
+            try:
+                async for msg in ch.history(limit=50):
+                    try: await msg.delete()
+                    except: pass
+            except: pass
 
     try:
-        await ctx.send("✅ Simulation complete — temporary channel removed.", delete_after=6)
+        await ctx.send("✅ Test complete — temporary channels removed.", delete_after=6)
     except:
         pass
         
@@ -1462,6 +1519,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
