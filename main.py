@@ -1208,11 +1208,11 @@ async def remindme(ctx, time: str, *, reminder: str):
     await ctx.send(f"⏰ Reminder for {ctx.author.mention}: {reminder}")
 
 # =========================
-# 💡 Suggestion System (Pro v6.8)
+# 💡 Suggestion System (Auto v7.0)
 # =========================
 
 SUGGESTION_CHANNEL_ID = 1418641633750159491   # Your suggestion channel
-CO_OWNER_ROLE_ID = 1418641632236011665        # Co-Owner role
+CO_OWNER_ROLE_ID = 1418641632236011664        # Co-Owner role
 
 
 # =========================
@@ -1232,7 +1232,6 @@ async def suggest(ctx, *, idea: str = None):
     if not channel:
         return await ctx.send("❌ Suggestion channel not found! Please contact an admin.")
 
-    # DB Insert
     async with aiosqlite.connect("bot.db") as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS suggestions (
@@ -1252,7 +1251,6 @@ async def suggest(ctx, *, idea: str = None):
         await db.commit()
         suggestion_id = cursor.lastrowid
 
-    # Embed
     embed = discord.Embed(
         title=f"💡 Suggestion #{suggestion_id}",
         description=f"```{idea}```",
@@ -1261,11 +1259,12 @@ async def suggest(ctx, *, idea: str = None):
     )
     embed.add_field(name="👤 Suggested by", value=ctx.author.mention, inline=True)
     embed.add_field(name="📌 Status", value="⏳ Pending Approval", inline=True)
-    embed.set_footer(text="Suggestion System • Pro v6.8")
+    embed.set_footer(text="Suggestion System • Auto v7.0")
 
     msg = await channel.send(embed=embed)
-    await msg.add_reaction("👍")
-    await msg.add_reaction("👎")
+    await msg.add_reaction("✅")  # Approve
+    await msg.add_reaction("❌")  # Deny
+    await msg.add_reaction("🤔")  # Maybe
 
     async with aiosqlite.connect("bot.db") as db:
         await db.execute("UPDATE suggestions SET message_id = ? WHERE id = ?", (msg.id, suggestion_id))
@@ -1279,113 +1278,80 @@ async def suggest(ctx, *, idea: str = None):
     await ctx.send(embed=confirm)
 
 
+
 # =========================
-# 🔧 Update Status
+# ⚙️ Reaction Handler (Approve / Deny / Maybe)
 # =========================
-async def update_status(ctx, suggestion_id: int, status: str, color: discord.Color, emoji: str):
+@bot.event
+async def on_reaction_add(reaction, user):
+    if user.bot:
+        return
+
+    message = reaction.message
+    guild = message.guild
+
+    # Only trigger inside suggestion channel
+    if not guild or message.channel.id != SUGGESTION_CHANNEL_ID:
+        return
+
+    # Check if message is a suggestion embed
+    if not message.embeds:
+        return
+
+    embed = message.embeds[0]
+    if not embed.title or not embed.title.startswith("💡 Suggestion #"):
+        return
+
+    # Check if user is co-owner
+    member = guild.get_member(user.id)
+    if CO_OWNER_ROLE_ID not in [r.id for r in member.roles]:
+        return
+
+    emoji = str(reaction.emoji)
+    status_map = {
+        "✅": ("Approved", discord.Color.green(), "✅"),
+        "❌": ("Denied", discord.Color.red(), "❌"),
+        "🤔": ("Under Review", discord.Color.gold(), "🤔")
+    }
+
+    if emoji not in status_map:
+        return
+
+    status_text, color, emoji_symbol = status_map[emoji]
+
+    # Find suggestion ID
+    suggestion_id = int(embed.title.split("#")[1])
+
+    # Update embed + DB
+    embed.set_field_at(1, name="📌 Status", value=f"{emoji_symbol} {status_text} by {user.mention}", inline=True)
+    embed.color = color
+    await message.edit(embed=embed)
+
+    # Update DB
     async with aiosqlite.connect("bot.db") as db:
-        cursor = await db.execute("SELECT message_id, channel_id, user_id FROM suggestions WHERE id = ?", (suggestion_id,))
+        await db.execute("UPDATE suggestions SET status = ? WHERE id = ?", (status_text, suggestion_id))
+        await db.commit()
+        cursor = await db.execute("SELECT user_id FROM suggestions WHERE id = ?", (suggestion_id,))
         row = await cursor.fetchone()
 
-    if not row:
-        return await ctx.send("❌ Suggestion not found.")
+    if row:
+        suggester = guild.get_member(row[0])
+        if suggester:
+            try:
+                await suggester.send(
+                    f"📢 Your suggestion (ID #{suggestion_id}) has been **{status_text}** by {user.mention}."
+                )
+            except:
+                pass
 
-    channel = ctx.guild.get_channel(row[1])
-    if not channel:
-        return await ctx.send("❌ Channel not found.")
-    msg = await channel.fetch_message(row[0])
+    # Remove other reactions to prevent spam
+    try:
+        await message.clear_reactions()
+    except:
+        pass
 
-    embed = msg.embeds[0]
-    embed.set_field_at(1, name="📌 Status", value=f"{emoji} {status} by {ctx.author.mention}", inline=True)
-    embed.color = color
-    await msg.edit(embed=embed)
-
-    async with aiosqlite.connect("bot.db") as db:
-        await db.execute("UPDATE suggestions SET status = ? WHERE id = ?", (status, suggestion_id))
-        await db.commit()
-
-    user = ctx.guild.get_member(row[2])
-    if user:
-        try:
-            await user.send(f"📢 Your suggestion (ID #{suggestion_id}) has been **{status}** by {ctx.author.mention}.")
-        except:
-            pass
-
-    await ctx.send(f"{emoji} Suggestion #{suggestion_id} marked as **{status}**.")
-
-
-# =========================
-# 🔒 Status Commands (Co-Owners Only)
-# =========================
-@bot.command(name="suggest-approve")
-async def suggest_approve(ctx, suggestion_id: int):
-    if CO_OWNER_ROLE_ID not in [r.id for r in ctx.author.roles]:
-        return await ctx.send("❌ You don’t have permission.")
-    await update_status(ctx, suggestion_id, "Approved", discord.Color.green(), "✅")
-
-@bot.command(name="suggest-deny")
-async def suggest_deny(ctx, suggestion_id: int):
-    if CO_OWNER_ROLE_ID not in [r.id for r in ctx.author.roles]:
-        return await ctx.send("❌ You don’t have permission.")
-    await update_status(ctx, suggestion_id, "Denied", discord.Color.red(), "❌")
-
-@bot.command(name="suggest-maybe")
-async def suggest_maybe(ctx, suggestion_id: int):
-    if CO_OWNER_ROLE_ID not in [r.id for r in ctx.author.roles]:
-        return await ctx.send("❌ You don’t have permission.")
-    await update_status(ctx, suggestion_id, "Under Review", discord.Color.gold(), "🤔")
-
-
-# =========================
-# 📜 Suggestion List (Paginated)
-# =========================
-@bot.command(name="suggestlist")
-async def suggestlist(ctx, status: str = "Pending"):
-    async with aiosqlite.connect("bot.db") as db:
-        cursor = await db.execute("SELECT id, suggestion, user_id, status FROM suggestions WHERE status = ?", (status,))
-        rows = await cursor.fetchall()
-
-    if not rows:
-        return await ctx.send(f"❌ No suggestions with status `{status}` found.")
-
-    pages = []
-    per_page = 5
-    for i in range(0, len(rows), per_page):
-        embed = discord.Embed(
-            title=f"📋 Suggestions ({status})",
-            color=discord.Color.blurple(),
-            timestamp=datetime.utcnow()
-        )
-        for row in rows[i:i+per_page]:
-            user = ctx.guild.get_member(row[2])
-            user_tag = user.mention if user else f"User ID {row[2]}"
-            embed.add_field(
-                name=f"ID #{row[0]} | By {user_tag}",
-                value=f"```{row[1][:500]}```\n📌 Status: **{row[3]}**",
-                inline=False
-            )
-        pages.append(embed)
-
-    class Paginator(discord.ui.View):
-        def __init__(self):
-            super().__init__(timeout=60)
-            self.index = 0
-
-        @discord.ui.button(label="⬅️ Prev", style=discord.ButtonStyle.primary)
-        async def prev(self, interaction, button):
-            if self.index > 0:
-                self.index -= 1
-                await interaction.response.edit_message(embed=pages[self.index], view=self)
-
-        @discord.ui.button(label="➡️ Next", style=discord.ButtonStyle.primary)
-        async def next(self, interaction, button):
-            if self.index < len(pages) - 1:
-                self.index += 1
-                await interaction.response.edit_message(embed=pages[self.index], view=self)
-
-    view = Paginator()
-    await ctx.send(embed=pages[0], view=view)
-
+    await message.add_reaction(emoji)  # keep only selected emoji
+    
 # =======================
 # Ghost ping
 # =======================
@@ -1519,6 +1485,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
