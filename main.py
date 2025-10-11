@@ -494,53 +494,6 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-# =========================
-# DATABASE SETUP
-# =========================
-async def setup_database():
-    async with aiosqlite.connect("bot.db") as db:
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS antinuke (
-            guild_id INTEGER PRIMARY KEY,
-            enabled INTEGER DEFAULT 0
-        )
-    ''')
-    await db.execute('''
-        CREATE TABLE IF NOT EXISTS antinuke_whitelist (
-            guild_id INTEGER,
-            user_id INTEGER,
-            PRIMARY KEY (guild_id, user_id)
-        )
-    ''')
-    await db.execute('''
-        CREATE TABLE IF NOT EXISTS antinuke_logs (
-            guild_id INTEGER PRIMARY KEY,
-            channel_id INTEGER
-        )
-    ''')
-    await db.execute('''
-        CREATE TABLE IF NOT EXISTS cases (
-            case_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            moderator_id INTEGER NOT NULL,
-            action TEXT NOT NULL,
-            reason TEXT,
-            timestamp TEXT
-        )
-    ''')
-    await db.execute('''
-        CREATE TABLE IF NOT EXISTS deleted_messages (
-            guild_id INTEGER,
-            channel_id INTEGER,
-            message_id INTEGER,
-            author_id INTEGER,
-            content TEXT,
-            attachments TEXT,
-            timestamp TEXT
-        )
-    ''')
-    await db.commit()
 
 # =========================
 # PROFESSIONAL ANTI-NUKE v2
@@ -1485,6 +1438,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
