@@ -32,30 +32,11 @@ DB_PATH = "roles.db"
 # =========================
 # DATABASE (cases table) - safe init with integrity check
 # =========================
-def ensure_db_file():
-    # If file exists, run integrity check. If it fails, remove file.
-    if os.path.exists(DB_PATH):
-        try:
-            con = sqlite3.connect(DB_PATH)
-            cur = con.cursor()
-            cur.execute("PRAGMA integrity_check;")
-            res = cur.fetchone()
-            con.close()
-            if not res or res[0] != "ok":
-                print("⚠️ roles.db integrity check failed -> removing corrupt DB and recreating.")
-                os.remove(DB_PATH)
-        except sqlite3.DatabaseError:
-            print("⚠️ roles.db is not a valid sqlite DB -> removing and recreating.")
-            try:
-                os.remove(DB_PATH)
-            except Exception:
-                pass
+CASE_DB = "cases.db"
 
-async def init_db():
-    # Ensure DB file is valid (or removed) before using aiosqlite
-    ensure_db_file()
-    async with aiosqlite.connect(DB_PATH) as conn:
-        await conn.execute('''
+async def setup_cases_db():
+    async with aiosqlite.connect(CASE_DB) as db:
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS cases (
                 case_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 guild_id INTEGER NOT NULL,
@@ -65,55 +46,46 @@ async def init_db():
                 reason TEXT,
                 timestamp TEXT
             )
-        ''')
-        await conn.commit()
+        """)
+        await db.commit()
+
 
 async def add_case(guild_id: int, user_id: int, moderator_id: int, action: str, reason: str):
     ts = datetime.now(timezone.utc).isoformat()
-    async with aiosqlite.connect(DB_PATH) as conn:
-        await conn.execute(
-            'INSERT INTO cases (guild_id, user_id, moderator_id, action, reason, timestamp) VALUES (?, ?, ?, ?, ?, ?)',
+    async with aiosqlite.connect(CASE_DB) as db:
+        await db.execute(
+            "INSERT INTO cases (guild_id, user_id, moderator_id, action, reason, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
             (guild_id, user_id, moderator_id, action, reason, ts)
         )
-        await conn.commit()
-        async with conn.execute('SELECT last_insert_rowid()') as cur:
+        await db.commit()
+        async with db.execute("SELECT last_insert_rowid()") as cur:
             row = await cur.fetchone()
             return row[0] if row else None
 
+
 async def get_user_cases(guild_id: int, user_id: int):
-    async with aiosqlite.connect(DB_PATH) as conn:
-        async with conn.execute(
-            'SELECT case_id, moderator_id, action, reason, timestamp FROM cases WHERE guild_id = ? AND user_id = ? ORDER BY case_id ASC',
+    async with aiosqlite.connect(CASE_DB) as db:
+        async with db.execute(
+            "SELECT case_id, moderator_id, action, reason, timestamp FROM cases WHERE guild_id = ? AND user_id = ? ORDER BY case_id ASC",
             (guild_id, user_id)
-        ) as cursor:
-            return await cursor.fetchall()
+        ) as cur:
+            return await cur.fetchall()
+
 
 async def get_case_by_id(guild_id: int, case_id: int):
-    async with aiosqlite.connect(DB_PATH) as conn:
-        async with conn.execute(
-            'SELECT case_id, guild_id, user_id, moderator_id, action, reason, timestamp FROM cases WHERE case_id = ? AND guild_id = ?',
+    async with aiosqlite.connect(CASE_DB) as db:
+        async with db.execute(
+            "SELECT case_id, guild_id, user_id, moderator_id, action, reason, timestamp FROM cases WHERE case_id = ? AND guild_id = ?",
             (case_id, guild_id)
         ) as cur:
             return await cur.fetchone()
 
+
 async def remove_case(case_id: int):
-    async with aiosqlite.connect(DB_PATH) as conn:
-        await conn.execute('DELETE FROM cases WHERE case_id = ?', (case_id,))
-        await conn.commit()
-
-async def get_case_counts(guild_id: int, user_id: int):
-    async with aiosqlite.connect(DB_PATH) as conn:
-        async with conn.execute(
-            'SELECT action, COUNT(*) FROM cases WHERE guild_id = ? AND user_id = ? GROUP BY action',
-            (guild_id, user_id)
-        ) as cur:
-            rows = await cur.fetchall()
-            counts = {"Warn": 0, "Mute": 0, "Kick": 0, "Ban": 0}
-            for action, cnt in rows:
-                if action in counts:
-                    counts[action] = cnt
-            return counts
-
+    async with aiosqlite.connect(CASE_DB) as db:
+        await db.execute("DELETE FROM cases WHERE case_id = ?", (case_id,))
+        await db.commit()
+        
 # =========================
 # BOT setup
 # =========================
@@ -493,8 +465,60 @@ async def on_message(message):
         await send_log(message.guild, embed)
 
     await bot.process_commands(message)
+# ===========================
+# BOT DATABASE SETUP
+# ===========================
 
+BOT_DB = "bot.db"
 
+async def setup_bot_db():
+    async with aiosqlite.connect(BOT_DB) as db:
+        # Anti-Nuke tables
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS antinuke (
+                guild_id INTEGER PRIMARY KEY,
+                enabled INTEGER DEFAULT 0
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS antinuke_whitelist (
+                guild_id INTEGER,
+                user_id INTEGER,
+                PRIMARY KEY (guild_id, user_id)
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS antinuke_logs (
+                guild_id INTEGER PRIMARY KEY,
+                channel_id INTEGER
+            )
+        """)
+        # Deleted messages
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS deleted_messages (
+                guild_id INTEGER,
+                channel_id INTEGER,
+                message_id INTEGER PRIMARY KEY,
+                author_id INTEGER,
+                content TEXT,
+                attachments TEXT,
+                timestamp TEXT
+            )
+        """)
+        # Suggestions table
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS suggestions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                message_id INTEGER,
+                channel_id INTEGER,
+                suggestion TEXT,
+                status TEXT DEFAULT 'Pending',
+                created_at TIMESTAMP
+            )
+        """)
+        await db.commit()
+    
 # =========================
 # PROFESSIONAL ANTI-NUKE v2
 # DATABASE SETUP (UPDATED)
@@ -900,6 +924,10 @@ async def massping(ctx, target: str = "everyone", repeats: int = 1, *, reason: s
 # =========================
 # CASE-BASED moderation
 # =========================
+
+# =========================
+# Warn Command
+# =========================
 @bot.command(name='warn')
 @commands.has_permissions(manage_roles=True)
 async def warn(ctx, member: discord.Member, *, reason: str = "No reason provided"):
@@ -916,6 +944,9 @@ async def warn(ctx, member: discord.Member, *, reason: str = "No reason provided
     await ctx.send(embed=embed)
     await log_command(ctx, f"Warned {member} | Case #{case_id} | Reason: {reason}", discord.Color.orange())
 
+# =========================
+# Warnings List Command
+# =========================
 @bot.command(name='warnings')
 @commands.has_permissions(manage_roles=True)
 async def warnings_cmd(ctx, member: discord.Member = None):
@@ -934,15 +965,21 @@ async def warnings_cmd(ctx, member: discord.Member = None):
     for cid, mod_id, action, reason, ts in cases:
         moderator = ctx.guild.get_member(mod_id)
         mod_name = str(moderator) if moderator else f"<@{mod_id}>"
-        # format timestamp
         try:
             ts_display = datetime.fromisoformat(ts).astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         except Exception:
             ts_display = str(ts)
-        embed.add_field(name=f"Case #{cid} — {action}", value=f"**Moderator:** {mod_name}\n**Reason:** {reason}\n**At:** {ts_display}", inline=False)
+        embed.add_field(
+            name=f"Case #{cid} — {action}",
+            value=f"**Moderator:** {mod_name}\n**Reason:** {reason}\n**At:** {ts_display}",
+            inline=False
+        )
     embed.set_footer(text=f"Warned: {counts['Warn']} | Muted: {counts['Mute']} | Kicked: {counts['Kick']} | Banned: {counts['Ban']}")
     await ctx.send(embed=embed)
 
+# =========================
+# Unwarn Command
+# =========================
 @bot.command(name='unwarn')
 @commands.has_permissions(manage_roles=True)
 async def unwarn_cmd(ctx, case_id: int):
@@ -965,7 +1002,6 @@ async def unwarn_cmd(ctx, case_id: int):
     embed.add_field(name="Action", value="Warn", inline=True)
     embed.add_field(name="Reason", value=reason, inline=False)
     embed.set_footer(text="Reply with yes/no within 30s")
-
     prompt = await ctx.send(embed=embed)
 
     def check(m):
@@ -988,7 +1024,9 @@ async def unwarn_cmd(ctx, case_id: int):
     else:
         await ctx.send("❌ Action cancelled.")
 
-# Manual mute tracked as case
+# =========================
+# Mute Command
+# =========================
 @bot.command(name='mute')
 @commands.has_permissions(manage_roles=True)
 async def mute_cmd(ctx, member: discord.Member, *, reason: str = "No reason provided"):
@@ -1005,10 +1043,15 @@ async def mute_cmd(ctx, member: discord.Member, *, reason: str = "No reason prov
         await ctx.send("⚠️ Unable to save case to database.")
         return
     counts = await get_case_counts(ctx.guild.id, member.id)
-    await ctx.send(f"🤐 Muted {member.mention} | Case #{case_id} | Reason: {reason}\nWarned: {counts['Warn']} | Muted: {counts['Mute']} | Kicked: {counts['Kick']} | Banned: {counts['Ban']}")
+    await ctx.send(
+        f"🤐 Muted {member.mention} | Case #{case_id} | Reason: {reason}\n"
+        f"Warned: {counts['Warn']} | Muted: {counts['Mute']} | Kicked: {counts['Kick']} | Banned: {counts['Ban']}"
+    )
     await log_command(ctx, f"Muted {member} | Case #{case_id} | Reason: {reason}", discord.Color.orange())
 
-# Kick / Ban (tracked)
+# =========================
+# Kick Command
+# =========================
 @bot.command(name='kick')
 @commands.has_permissions(kick_members=True)
 async def kick_cmd(ctx, member: discord.Member, *, reason: str = "No reason provided"):
@@ -1024,6 +1067,9 @@ async def kick_cmd(ctx, member: discord.Member, *, reason: str = "No reason prov
     await ctx.send(f"👢 Kicked {member.mention} | Case #{case_id} | Reason: {reason}")
     await log_command(ctx, f"Kicked {member} | Case #{case_id} | Reason: {reason}", discord.Color.red())
 
+# =========================
+# Ban Command
+# =========================
 @bot.command(name='ban')
 @commands.has_permissions(ban_members=True)
 async def ban_cmd(ctx, member: discord.Member, *, reason: str = "No reason provided"):
@@ -1037,9 +1083,7 @@ async def ban_cmd(ctx, member: discord.Member, *, reason: str = "No reason provi
         await ctx.send("⚠️ Unable to save case to database.")
         return
     await ctx.send(f"🔨 Banned {member.mention} | Case #{case_id} | Reason: {reason}")
-    await log_command(ctx, f"Banned {member} | Case #{case_id} | Reason: {reason}", discord.Color.red())
-
-# =========================
+    await log_command(ctx, f"Banned {member} | Case #{case_id} | Reason: {reason}", discord.Color.red())# =========================
 # Utility commands
 # =========================
 @bot.command(name="clear")
@@ -1438,6 +1482,7 @@ async def help(ctx):
 # =========================
 keep_alive()
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
 
